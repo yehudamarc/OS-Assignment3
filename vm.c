@@ -231,6 +231,40 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 
   a = PGROUNDUP(oldsz);
   for(; a < newsz; a += PGSIZE){
+  	// If we reached maximum amount of pages
+  	if(myproc()->totalpg >= MAX_TOTAL_PAGES){
+  		cprintf("max pages - cannot open new");
+  		return 0;
+  	}
+  	// If out of physical memory for pages
+  	if(myproc()->psycpg >= MAX_PSYC_PAGES){
+  		// Make space in physical memory by swapping 1 page
+  		// Choose page to swap
+  		struct page pg = myproc()->psycPages[0];
+  		// Look for free space in swapFile
+  		uint swap_index = -1;
+  		for(int i = 0; i < 16; i++){
+  			if(myproc()->swapPages[i] == 0){
+  				swap_index = i;
+  				break;
+  			}
+  		}
+  		if(swap_index == -1)
+  			panic("No free space in swapFile!");
+  		// Save in swapFile
+  		if(writeToSwapFile(myproc(), PTE_ADDR(pg->pte), swap_index, PGSIZE) < 0)
+  			panic("writeToSwapFile failed!")
+  		// Update info about swapFile
+  		myproc()->swapPages[swap_index] = pg->pte;
+  		// Free the space in physical memory
+  		kfree(PTE_ADDR(pg->pte));
+  		// Update PTE info
+  		pg->pte =& !PTE_P;	// Turn off
+  		pg->pte =| PTE_PG;	// Turn on
+  		myproc()->psycPages[0] = 0;	// Update physical array
+  		myproc()->psycpg--;	// Update counter
+  	}
+
     mem = kalloc();
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
@@ -244,6 +278,20 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       kfree(mem);
       return 0;
     }
+    // Update physical memory info
+    uint free_indx == -1;
+    for(int i = 0; i < 16; i++){
+    	if(myproc()->psycPages[i] == 0){
+    		free_indx = i;
+    		break;
+    	}
+    }
+    if(free_indx == -1)
+    	panic("No free space in physical memory!");
+    myproc()->psycPages[free_indx] = walkpgdir(myproc()->pgdir, (char*)a, 0);
+    // Update counters
+    myproc()->psycpg++;
+    myproc()->totalpg++;
   }
   return newsz;
 }
