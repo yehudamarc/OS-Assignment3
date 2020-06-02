@@ -53,8 +53,8 @@ struct proc {
   struct file *swapFile;      //page file
   uint totalpg; 				// Number of total pages in memory
   uint psycpg; 					// Number of pages in physical memory
-  pte_t[16] swapPages; 			// The index is the offset in swapFile
-  pte_t[16] psycPages; 		// Containing the PTEs of the pages in physical memory
+  uint swapPages[16]; 			// The index is the offset in swapFile
+  uint psycPages[16]; 			// Containing the VAs of the pages in physical memory
 };
 
 // Process memory is laid out contiguously, low addresses first:

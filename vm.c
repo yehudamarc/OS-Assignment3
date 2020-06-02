@@ -10,6 +10,8 @@
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
 
+static void swapToFile(struct proc *p);
+
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
 void
@@ -223,6 +225,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
   char *mem;
   uint a;
+  struct proc *p = myproc();
 
   if(newsz >= KERNBASE)
     return 0;
@@ -231,40 +234,17 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 
   a = PGROUNDUP(oldsz);
   for(; a < newsz; a += PGSIZE){
-  	// If we reached maximum amount of pages
-  	if(myproc()->totalpg >= MAX_TOTAL_PAGES){
-  		cprintf("max pages - cannot open new");
-  		return 0;
-  	}
-  	// If out of physical memory for pages
-  	if(myproc()->psycpg >= MAX_PSYC_PAGES){
-  		// Make space in physical memory by swapping 1 page
-  		// Choose page to swap
-  		struct page pg = myproc()->psycPages[0];
-  		// Look for free space in swapFile
-  		uint swap_index = -1;
-  		for(int i = 0; i < 16; i++){
-  			if(myproc()->swapPages[i] == 0){
-  				swap_index = i;
-  				break;
-  			}
-  		}
-  		if(swap_index == -1)
-  			panic("No free space in swapFile!");
-  		// Save in swapFile
-  		if(writeToSwapFile(myproc(), PTE_ADDR(pg->pte), swap_index, PGSIZE) < 0)
-  			panic("writeToSwapFile failed!")
-  		// Update info about swapFile
-  		myproc()->swapPages[swap_index] = pg->pte;
-  		// Free the space in physical memory
-  		kfree(PTE_ADDR(pg->pte));
-  		// Update PTE info
-  		pg->pte =& !PTE_P;	// Turn off
-  		pg->pte =| PTE_PG;	// Turn on
-  		myproc()->psycPages[0] = 0;	// Update physical array
-  		myproc()->psycpg--;	// Update counter
-  	}
-
+  	if(p->pid > 2){
+	  	// If we reached maximum amount of pages
+	  	if(myproc()->totalpg >= MAX_TOTAL_PAGES){
+	  		cprintf("max pages - cannot open new");
+	  		return 0;
+	  	}
+	  	// If out of physical memory for pages
+	  	if(p->psycpg >= MAX_PSYC_PAGES){
+	  		swapToFile(p);
+	  	}
+	}
     mem = kalloc();
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
@@ -278,20 +258,24 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       kfree(mem);
       return 0;
     }
-    // Update physical memory info
-    uint free_indx == -1;
-    for(int i = 0; i < 16; i++){
-    	if(myproc()->psycPages[i] == 0){
-    		free_indx = i;
-    		break;
-    	}
-    }
-    if(free_indx == -1)
-    	panic("No free space in physical memory!");
-    myproc()->psycPages[free_indx] = walkpgdir(myproc()->pgdir, (char*)a, 0);
-    // Update counters
-    myproc()->psycpg++;
-    myproc()->totalpg++;
+
+    if(p->pid > 2){
+	    // Update physical memory info
+	    uint free_indx = -1;
+	    for(int i = 0; i < 16; i++){
+	    	if(p->psycPages[i] == 0){
+	    		free_indx = i;
+	    		break;
+	    	}
+	    }
+	    if(free_indx == -1)
+	    	panic("No free space in physical memory!");
+	    // walkpgdir(p->pgdir, (char*)a, 0);
+	    p->psycPages[free_indx] = a;
+	    // Update counters
+	    p->psycpg++;
+	    p->totalpg++;
+	}
   }
   return newsz;
 }
@@ -440,3 +424,100 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+// Aid function - swap from physical memory to file
+// Make sure that there is free space in swapFile upon calling
+static void
+swapToFile(struct proc *p){
+	// Make space in physical memory by swapping 1 page
+	// Choose page to swap
+	uint va = p->psycPages[0];
+	pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
+	// Look for free space in swapFile
+	uint swap_index = -1;
+	for(int i = 0; i < 16; i++){
+	  	if(p->swapPages[i] == 0){
+	  		swap_index = i;
+	  		break;
+	  	}
+	}
+	if(swap_index == -1)
+	  	panic("No free space in swapFile!");
+	// Save in swapFile
+	if(writeToSwapFile(p, (char*) PTE_ADDR(*pte), swap_index*PGSIZE, PGSIZE) < 0)
+	  	panic("writeToSwapFile failed!");
+	// Update info about swapFile
+	p->swapPages[swap_index] = va;
+	// Free the space in physical memory
+	kfree((char*)PTE_ADDR(*pte));
+	// Update PTE info
+	*pte &= ~PTE_P;			// Turn off
+	*pte |= PTE_PG;			// Turn on
+	lcr3(V2P(p->pgdir));	// Flush TLB
+	p->psycPages[0] = 0;	// Update physical array
+	p->psycpg--;			// Update counter
+}
+
+
+// Aid function to trap
+void
+SwapToRam(uint pg_va){
+  struct proc *p = myproc();
+
+    // Allocate physical memory
+    char *mem = kalloc();
+    if(mem == 0)
+      panic("trap: couldn't allocate memory");
+    memset(mem, 0, PGSIZE);
+    // Find the page in swapFile
+    uint swap_indx = -1;
+    for(int i = 0; i < 16; i++){
+      if(p->swapPages[i] == pg_va){
+        swap_indx = i;
+        break;
+      }
+    }
+    if(swap_indx == -1)
+      panic("trap: couldn't find page in swapFile");
+    // Write the page to physical memory
+    if(readFromSwapFile(p, mem, swap_indx*PGSIZE, PGSIZE) < 0)
+      panic("trap: couldn't read from swapFile");
+    p->psycpg++;
+    // free the space in swapFile
+    // @TODO: check of works
+    char buf[PGSIZE] = "";
+    if(writeToSwapFile(p, buf, swap_indx*PGSIZE, PGSIZE) < 0)
+	  	panic("writeToSwapFile failed!");
+	p->swapPages[swap_indx] = 0;
+
+    // If there is no space in physical memory - swap 1 page
+    if(p->psycpg > MAX_PSYC_PAGES)
+      swapToFile(p);
+  	// Update physical memory array
+    uint psyc_indx = -1;
+    for(int i = 0; i < 16; i++){
+    	if(p->psycPages[i] == 0){
+    		psyc_indx = i;
+    		break;
+    	}
+    }
+    if(psyc_indx == -1)
+    	panic("trap: no free space in physical memory");
+    p->psycPages[psyc_indx] = pg_va;
+    // update pte
+    pte_t *pte = walkpgdir(p->pgdir, (char*)pg_va, 0);
+    *pte |= (uint)mem; // update physical memory
+    *pte |= PTE_U | PTE_W | PTE_P;  // mark as present, userspace and writeable
+    *pte &= ~PTE_PG;   // Turn off page flag
+
+}
+
+// Check if the file is in swapFile
+int
+checkIfSwapFault(uint va){
+	struct proc *p = myproc();
+	// (pte_t*)P2V(PTE_ADDR(*pde))
+	// return !((p->pgdir[PDX(va)])[PTX(va)] & PTE_P) &&
+    // (p->pgdir[PDX(va)])[PTX(va)] & PTE_PG;
+    return !((PTE_ADDR(*(p->pgdir[PDX(va)])))[PTX(va)] & PTE_P) &&
+    		(PTE_ADDR(*(p->pgdir[PDX(va)])))[PTX(va)] & PTE_PG;
+}

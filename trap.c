@@ -77,6 +77,18 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  // In case we have page fault we check if we need to pull page from swapFile
+  case T_PGFLT:
+  	// get va of the page
+  	// uint pg_va = PGROUNDDOWN(rcr2());
+  	// Check if the page in is swap file
+  	if(checkIfSwapFault(PGROUNDDOWN(rcr2()))){
+  	// Get page from swapFile
+  	SwapToRam(PGROUNDDOWN(rcr2()));
+  	break;
+	}
+	// @TODO: check if process try to read from page again
+
 
   //PAGEBREAK: 13
   default:

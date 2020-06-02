@@ -102,6 +102,21 @@ found:
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
+   // Initilize arrays
+  for(int i = 0; i < 16; i++){
+  p->swapPages[i] = 0;
+  p->psycPages[i] = 0;
+  }
+  if(p->pid > 2){
+  // Creating Swap File
+  createSwapFile(p);
+  /*
+  char buf[16*PGSIZE] = "";
+  if(writeToSwapFile(p, buf, 0, 16*PGSIZE) < 0)
+    panic("coudln't prepare swapFile!");
+  */
+  }
+
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -112,6 +127,8 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  
+ 
   return p;
 }
 
@@ -294,6 +311,8 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        // Delete swapFile
+        removeSwapFile(p);
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
