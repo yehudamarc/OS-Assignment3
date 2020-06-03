@@ -51,6 +51,10 @@ struct proc {
   char name[16];               // Process name (debugging)
   //Swap file. must initiate with create swap file
   struct file *swapFile;      //page file
+  uint swapPages[16];         // index is index in swapFile, content is va
+  uint ramPages[16];          // contain va's for pages in ram
+  uint ramCounter;            // Number of pages in RAM
+  uint swapCounter;           // Number of pages in swapFile
 };
 
 // Process memory is laid out contiguously, low addresses first:

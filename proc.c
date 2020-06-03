@@ -112,6 +112,17 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  // Initilize fields
+  for(int i = 0; i < 16; i++){
+    p->swapPages[i] = 0;
+    p->ramPages[i] = 0;
+  }
+  p->ramCounter = 0;
+  p->swapCounter = 0;
+
+  if(p->pid > 2)
+    createSwapFile(p);
+
   return p;
 }
 
@@ -211,7 +222,26 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
+  
+  // Copy swapFile if exist
+  if(curproc->swapFile != 0){
 
+    int i = 0;
+    char buf[PGSIZE/2] = "";
+    while(readFromSwapFile(curproc, buf, i*(PGSIZE/2), PGSIZE/2) != 0){
+      if(writeToSwapFile(np, buf, i*(PGSIZE/2), PGSIZE/2) < 0)
+        panic("fork: couldnt write to swap file");
+      i++;
+    }
+    // Copy parent's state
+    for(int j = 0; j < 16; j++){
+      np->ramPages[j] = curproc->ramPages[j];
+      np->swapPages[j] = curproc->swapPages[j];
+    }
+    np->swapCounter = curproc->swapCounter;
+    np->ramCounter = curproc->ramCounter;
+  }
+  
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
@@ -294,6 +324,17 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        // Reset paging fields
+        
+        for(int i = 0; i < 16; i++){
+          p->swapPages[i] = 0;
+          p->ramPages[i] = 0;
+        }
+        p->swapCounter = 0;
+        p->ramCounter = 0;
+        if(p->pid > 2)
+          removeSwapFile(p);
+        
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;

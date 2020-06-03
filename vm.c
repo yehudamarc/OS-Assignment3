@@ -10,6 +10,10 @@
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
 
+static int swapToFile(struct proc *p);
+static int findFreePage(struct proc *p);
+
+
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
 void
@@ -223,6 +227,8 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
   char *mem;
   uint a;
+  // @TODO: what if it is another proccess?
+  struct proc *p = myproc();
 
   if(newsz >= KERNBASE)
     return 0;
@@ -231,6 +237,15 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 
   a = PGROUNDUP(oldsz);
   for(; a < newsz; a += PGSIZE){
+    // Check if can generate more pages
+    if(p->pid > 2 && p->ramCounter == 16){
+      if(p->swapCounter < 16)
+        swapToFile(p);
+      else
+        return 0;
+      // @TODO: return 0?
+    }
+
     mem = kalloc();
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
@@ -243,6 +258,14 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       deallocuvm(pgdir, newsz, oldsz);
       kfree(mem);
       return 0;
+    }
+    if(p->pid > 2){
+      // Update process paging info
+      int indx = findFreePage(p);
+      if(indx == -1)
+        panic("alocuvm: no free space in ramPages!");
+      p->ramPages[indx] = a;
+      p->ramCounter++;
     }
   }
   return newsz;
@@ -257,6 +280,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
   pte_t *pte;
   uint a, pa;
+  struct proc *p = myproc();
 
   if(newsz >= oldsz)
     return oldsz;
@@ -272,7 +296,28 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         panic("kfree");
       char *v = P2V(pa);
       kfree(v);
+      
+      // Clear the place in ram array
+      if(p->pgdir == pgdir){
+        for (int i = 0; i < 16; ++i){
+          if(p->ramPages[i] == a){
+            p->ramPages[i] = 0;
+            break;
+          }
+        }
+      }
+      
       *pte = 0;
+    }else if(*pte & PTE_PG){ // In case page is in swapFile
+      // Clear the place in swap array
+      if(p->pgdir == pgdir){
+        for (int i = 0; i < 16; ++i){
+          if(p->swapPages[i] == a){
+            p->swapPages[i] = 0;
+            break;
+          }
+        }
+      }
     }
   }
   return newsz;
@@ -325,8 +370,15 @@ copyuvm(pde_t *pgdir, uint sz)
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
-    if(!(*pte & PTE_P))
+    if(!(*pte & PTE_P)){
+      if(*pte & PTE_PG){
+        pte = walkpgdir(d, (void*)i, 1); // Create PTE for the page
+        // Turn on relevant flags. no physical address
+        *pte = PTE_U | PTE_W | PTE_PG;
+        continue;
+      }
       panic("copyuvm: page not present");
+    }
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -392,3 +444,58 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+// Swap 1 page from RAM to file for given process
+// page replacement prefrences should be implwmented here
+static int
+swapToFile(struct proc *p){
+  // Find free space in swap file
+  int indx = -1;
+  for(int i = 0; i < 16; i++){
+    if(p->swapPages[i] == 0){
+      indx = i;
+      break;
+    }
+  }
+  if(indx == -1)
+    return -1;
+
+  // Choose from physical memory file to swap
+  uint va = p->ramPages[0];
+
+  // get PTE of chosen page
+  pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
+
+  // Write to file - split because it seems to not work with PGSIZE
+  if(writeToSwapFile(p, (char*) PTE_ADDR(*pte), indx*PGSIZE, PGSIZE/2) < 0)
+    panic("swapToFile: couldnt write to file!");
+  if(writeToSwapFile(p, (char*) (PTE_ADDR(*pte) + PGSIZE/2), indx*PGSIZE + PGSIZE/2, PGSIZE/2) < 0)
+    panic("swapToFile: couldnt write to file!");
+
+  // Update paging info
+  p->ramCounter--;
+  p->swapPages[indx] = va;
+
+  // Update PTE info
+  *pte &= ~PTE_P;       // Turn off
+  *pte |= PTE_PG;       // Turn on
+  lcr3(V2P(p->pgdir));  // Flush TLB 
+
+  // Free memory
+  kfree((char*) (PTE_ADDR(*pte)));
+
+  return 0;
+}
+
+// Find free slot on ramPages array of given process
+// if there is no free space return -1
+static int
+findFreePage(struct proc *p){
+  int indx = -1;
+  for(int i = 0; i < 16; i++){
+    if(p->ramPages[i] == 0){
+      indx = i;
+      break;
+    }
+  }
+  return indx;
+}
