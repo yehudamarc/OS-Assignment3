@@ -514,10 +514,10 @@ SwapToRam(uint pg_va){
 // Check if the file is in swapFile
 int
 checkIfSwapFault(uint va){
-	struct proc *p = myproc();
-	// (pte_t*)P2V(PTE_ADDR(*pde))
-	// return !((p->pgdir[PDX(va)])[PTX(va)] & PTE_P) &&
-    // (p->pgdir[PDX(va)])[PTX(va)] & PTE_PG;
-    return !((PTE_ADDR(*(p->pgdir[PDX(va)])))[PTX(va)] & PTE_P) &&
-    		(PTE_ADDR(*(p->pgdir[PDX(va)])))[PTX(va)] & PTE_PG;
+  pde_t* pgdir = myproc()->pgdir;
+  pde_t *pde = &pgdir[PDX(va)];
+  pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+  pte_t * pte = &pgtab[PTX(va)];
+
+  return !(*pte & PTE_P) && (*pte & PTE_PG);
 }
