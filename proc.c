@@ -102,19 +102,19 @@ found:
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
-   // Initilize arrays
+
+  // Initilize arrays
   for(int i = 0; i < 16; i++){
-  p->swapPages[i] = 0;
-  p->psycPages[i] = 0;
+    p->swapPages[i] = 0;
+    p->psycPages[i] = 0;
   }
   if(p->pid > 2){
-  // Creating Swap File
-  createSwapFile(p);
-  /*
-  char buf[16*PGSIZE] = "";
-  if(writeToSwapFile(p, buf, 0, 16*PGSIZE) < 0)
-    panic("coudln't prepare swapFile!");
-  */
+    // Creating Swap File
+    createSwapFile(p);
+    
+    // char buf[16*PGSIZE] = "";
+    // if(writeToSwapFile(p, buf, 0, 16*PGSIZE) < 0)
+      // panic("coudln't prepare swapFile!");
   }
 
   // Set up new context to start executing at forkret,
@@ -228,6 +228,23 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
+  
+  // Copy swapFile data
+  if(curproc->pid > 2){
+    for(int i = 0; i < 16; i++){
+      char buf[PGSIZE] = "";
+      if(curproc->swapPages[i] == 0)
+        writeToSwapFile(np, buf, i*PGSIZE, PGSIZE);
+      else{
+        readFromSwapFile(curproc, buf, i*PGSIZE, PGSIZE);
+        writeToSwapFile(np, buf, i*PGSIZE, PGSIZE);
+      }
+      np->swapPages[i] = curproc->swapPages[i];
+      np->psycPages[i] = curproc->psycPages[i];
+    }
+    np->totalpg = curproc->totalpg;
+    np->psycpg = curproc->psycpg;
+  }
 
   acquire(&ptable.lock);
 
@@ -312,7 +329,16 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         // Delete swapFile
-        removeSwapFile(p);
+       if(p->pid > 2)
+          removeSwapFile(p);
+        // Reset fields
+        p->totalpg = 0;
+        p->psycpg = 0;
+        for(int i = 0; i < 16; i++){
+          p->swapPages[i] = 0;
+          p->psycPages[i] = 0;
+          // @TODO: release physical memory?
+        }
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;

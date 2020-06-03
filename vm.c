@@ -222,7 +222,7 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
-{
+{ 
   char *mem;
   uint a;
   struct proc *p = myproc();
@@ -244,7 +244,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 	  	if(p->psycpg >= MAX_PSYC_PAGES){
 	  		swapToFile(p);
 	  	}
-	}
+    }
     mem = kalloc();
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
@@ -275,7 +275,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 	    // Update counters
 	    p->psycpg++;
 	    p->totalpg++;
-	}
+    }
   }
   return newsz;
 }
@@ -304,6 +304,16 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         panic("kfree");
       char *v = P2V(pa);
       kfree(v);
+      // Update the PCB info
+      struct proc *p = myproc();
+      if(p->pgdir == pgdir){
+        for(int i = 0; i < 16; i++){
+          if(p->psycPages[i] == a){
+            p->psycPages[i] = 0;
+            break;
+          }
+        }
+      }
       *pte = 0;
     }
   }
@@ -357,8 +367,13 @@ copyuvm(pde_t *pgdir, uint sz)
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
-    if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
+    if(!(*pte & PTE_P)){
+      if(*pte & PTE_PG){
+        continue;
+      }
+      else
+        panic("copyuvm: page not present");
+    }
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)

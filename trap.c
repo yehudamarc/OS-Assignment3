@@ -86,7 +86,7 @@ trap(struct trapframe *tf)
   	// Get page from swapFile
   	SwapToRam(PGROUNDDOWN(rcr2()));
   	break;
-	}
+	} 
 	// @TODO: check if process try to read from page again
 
 

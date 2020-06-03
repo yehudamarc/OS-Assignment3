@@ -50,11 +50,11 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   //Swap file. must initiate with create swap file
-  struct file *swapFile;      //page file
-  uint totalpg; 				// Number of total pages in memory
-  uint psycpg; 					// Number of pages in physical memory
-  uint swapPages[16]; 			// The index is the offset in swapFile
-  uint psycPages[16]; 			// Containing the VAs of the pages in physical memory
+  struct file *swapFile;       //page file
+  uint totalpg; 				       // Number of total pages in memory
+  uint psycpg; 					       // Number of pages in physical memory
+  uint swapPages[16]; 			   // The index is the offset in swapFile
+  uint psycPages[16]; 			   // Containing the VAs of the pages in physical memory
 };
 
 // Process memory is laid out contiguously, low addresses first:
