@@ -445,9 +445,14 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 // Blank page.
 
 // Swap 1 page from RAM to file for given process
+// Assume we have free space in swapFile
 // page replacement prefrences should be implwmented here
 static int
 swapToFile(struct proc *p){
+  // If init or shell
+  if(p->pid > 2)
+    return -1;
+  
   // Find free space in swap file
   int indx = -1;
   for(int i = 0; i < 16; i++){
@@ -460,7 +465,8 @@ swapToFile(struct proc *p){
     return -1;
 
   // Choose from physical memory file to swap
-  uint va = p->ramPages[0];
+  int ramIndx = 0;
+  uint va = p->ramPages[ramIndx];
 
   // get PTE of chosen page
   pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
@@ -472,8 +478,10 @@ swapToFile(struct proc *p){
     panic("swapToFile: couldnt write to file!");
 
   // Update paging info
+  p->ramPages[ramIndx] = 0;
   p->ramCounter--;
   p->swapPages[indx] = va;
+  p->swapCounter++;
 
   // Update PTE info
   *pte &= ~PTE_P;       // Turn off
@@ -498,4 +506,82 @@ findFreePage(struct proc *p){
     }
   }
   return indx;
+}
+
+// Check if the file is in swapFile
+int
+checkIfSwapFault(uint va){
+  pde_t* pgdir = myproc()->pgdir;
+  pde_t *pde = &pgdir[PDX(va)];
+  pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+  pte_t * pte = &pgtab[PTX(va)];
+
+  return !(*pte & PTE_P) && (*pte & PTE_PG);
+}
+
+// Take page from swap file and move it into physical memory
+void
+swapToRam(uint va){
+  struct proc *p = myproc();
+
+  // If init or shell
+  if(p->pid > 2)
+    panic("swapToRam: process pid <= 2");
+
+  // Find page if swapFile
+  int indx = -1;
+  for(int i = 0; i < 16; i++){
+    if(p->swapPages[i] == va){
+      indx = i;
+      break;
+    }
+  }
+  if(indx == -1)
+    panic("swapToRam: requested page not found");
+
+  // Save page in temporary buffer
+  char buf1[PGSIZE/2] = "";
+  char buf2[PGSIZE/2] = "";
+
+  if(readFromSwapFile(p, buf1, indx*PGSIZE, PGSIZE/2) < 0)
+    panic("swapToRam: couldnt read from swap file");
+   if(readFromSwapFile(p, buf2, indx*PGSIZE + PGSIZE/2, PGSIZE/2) < 0)
+    panic("swapToRam: couldnt read from swap file");
+
+  // Free space in swap file
+  p->swapPages[indx] = 0;
+  p->swapCounter--;
+
+  // If RAM is full - swap 1 page to file
+  if(p->ramCounter >= 16)
+    swapToFile(p);
+
+  // Find free space in RAM
+  indx = -1;
+  for(int i = 0; i < 16; i++){
+    if(p->ramPages[i] == 0){
+      indx = i;
+      break;
+    }
+  }
+  if(indx == -1)
+    panic("swapToRam: couldnt find free space in RAM");
+
+  // Allocate memory in RAM
+  char *mem = kalloc();
+  if(mem == 0)
+    panic("swapToRam: couldnt find free space in RAM");
+  memset(mem, 0, PGSIZE);
+
+  // Write from buffer to memory
+  memmove(mem, buf1, PGSIZE/2);
+  memmove(mem + PGSIZE/2, buf2, PGSIZE/2);
+
+  // Update PTE
+  pte_t *pte = walkpgdir(p->pgdir, (char*)va, 0);
+  *pte = (uint)mem | ((PTE_FLAGS(*pte) | PTE_P) & ~PTE_PG);
+
+  // Update process paging info
+  p->ramPages[indx] = va;
+  p->ramCounter++;
 }
