@@ -271,6 +271,9 @@ exit(void)
       curproc->ofile[fd] = 0;
     }
   }
+  // Close swapFile
+  if(p->pid > 2)
+    removeSwapFile(p);
 
   begin_op();
   iput(curproc->cwd);
@@ -332,8 +335,6 @@ wait(void)
         }
         p->swapCounter = 0;
         p->ramCounter = 0;
-        if(p->pid > 2)
-          removeSwapFile(p);
         
         p->state = UNUSED;
         release(&ptable.lock);
