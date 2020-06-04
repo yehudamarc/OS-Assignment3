@@ -29,6 +29,28 @@ exec(char *path, char **argv)
   ilock(ip);
   pgdir = 0;
 
+  // Backup swap file and paging info
+  // @TODO: backup paging info and swapFile
+  // struct file *swapFileBackup = curproc->swapFile; // save pointer
+  uint ramCounterBackup = curproc->ramCounter;
+  // uint swapCounterBackup = curproc->swapCounter;
+  // uint swapPagesBackup[16];
+  uint ramPagesBackup[16];
+  for(int i = 0; i < 16; i++){
+    // swapPagesBackup[i] = curproc->swapPages[i];
+    ramPagesBackup[i] = curproc->ramPages[i];
+  }
+
+  // Clean paging info and structures
+  removeSwapFile(curproc);
+  createSwapFile(curproc);
+  curproc->swapCounter = 0;
+  curproc->ramCounter = 0;
+  for(int i = 0; i < 16; i++){
+    curproc->swapPages[i] = 0;
+    curproc->ramPages[i] = 0;
+  }
+
   // Check ELF header
   if(readi(ip, (char*)&elf, 0, sizeof(elf)) != sizeof(elf))
     goto bad;
@@ -110,5 +132,16 @@ exec(char *path, char **argv)
     iunlockput(ip);
     end_op();
   }
+
+  //Restore from Backup
+  // removeSwapFile(curproc);
+  // curproc->swapFile = swapFileBackup;
+  curproc->ramCounter = ramCounterBackup;
+  // curproc->swapCounter = swapCounterBackup;
+  for(int i = 0; i < 16; i++){
+    // curproc->swapPages[i] = swapPagesBackup[i];
+    curproc->ramPages[i] = ramPagesBackup[i];
+  }
+
   return -1;
 }

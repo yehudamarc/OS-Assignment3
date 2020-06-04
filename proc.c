@@ -272,8 +272,8 @@ exit(void)
     }
   }
   // Close swapFile
-  if(p->pid > 2)
-    removeSwapFile(p);
+  if(curproc->pid > 2)
+    removeSwapFile(curproc);
 
   begin_op();
   iput(curproc->cwd);
@@ -328,7 +328,6 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         // Reset paging fields
-        
         for(int i = 0; i < 16; i++){
           p->swapPages[i] = 0;
           p->ramPages[i] = 0;

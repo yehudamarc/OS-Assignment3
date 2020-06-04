@@ -239,8 +239,10 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
   for(; a < newsz; a += PGSIZE){
     // Check if can generate more pages
     if(p->pid > 2 && p->ramCounter == 16){
-      if(p->swapCounter < 16)
-        swapToFile(p);
+      if(p->swapCounter < 16){
+        if(swapToFile(p) < 0)
+          panic("allocuvm: swapToFile failed!");
+      }
       else
         return 0;
       // @TODO: return 0?
@@ -450,9 +452,9 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 static int
 swapToFile(struct proc *p){
   // If init or shell
-  if(p->pid > 2)
+  if(p->pid < 2)
     return -1;
-  
+
   // Find free space in swap file
   int indx = -1;
   for(int i = 0; i < 16; i++){
@@ -463,33 +465,33 @@ swapToFile(struct proc *p){
   }
   if(indx == -1)
     return -1;
-
+  
   // Choose from physical memory file to swap
   int ramIndx = 0;
   uint va = p->ramPages[ramIndx];
 
   // get PTE of chosen page
   pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
-
+  
   // Write to file - split because it seems to not work with PGSIZE
-  if(writeToSwapFile(p, (char*) PTE_ADDR(*pte), indx*PGSIZE, PGSIZE/2) < 0)
+  if(writeToSwapFile(p, (char*) P2V(PTE_ADDR(*pte)), indx*PGSIZE, PGSIZE/2) < 0)
     panic("swapToFile: couldnt write to file!");
-  if(writeToSwapFile(p, (char*) (PTE_ADDR(*pte) + PGSIZE/2), indx*PGSIZE + PGSIZE/2, PGSIZE/2) < 0)
+  if(writeToSwapFile(p, (char*) (P2V(PTE_ADDR(*pte)) + PGSIZE/2), indx*PGSIZE + PGSIZE/2, PGSIZE/2) < 0)
     panic("swapToFile: couldnt write to file!");
-
+  
   // Update paging info
   p->ramPages[ramIndx] = 0;
   p->ramCounter--;
   p->swapPages[indx] = va;
   p->swapCounter++;
-
+  
   // Update PTE info
   *pte &= ~PTE_P;       // Turn off
   *pte |= PTE_PG;       // Turn on
   lcr3(V2P(p->pgdir));  // Flush TLB 
 
   // Free memory
-  kfree((char*) (PTE_ADDR(*pte)));
+  kfree((char*) P2V(PTE_ADDR(*pte)));
 
   return 0;
 }

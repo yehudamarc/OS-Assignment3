@@ -793,8 +793,9 @@ createSwapFile(struct proc* p)
 int
 writeToSwapFile(struct proc * p, char* buffer, uint placeOnFile, uint size)
 {
+  
   p->swapFile->off = placeOnFile;
-
+  
   return filewrite(p->swapFile, buffer, size);
 
 }
