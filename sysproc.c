@@ -39,6 +39,13 @@ sys_kill(void)
 int
 sys_getpid(void)
 {
+  // struct proc *p = myproc();
+  // for(int i = 0; i < 16; i++){
+  //   cprintf("%s%d%s", "the ", i, " place: ");
+  //   cprintf("%s%d%s%d", "ram: ", p->ramPages[i], " file: ",p->swapPages[i]);
+  //   cprintf("\n");
+  // }
+  // return 0;
   return myproc()->pid;
 }
 

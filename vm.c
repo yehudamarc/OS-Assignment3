@@ -12,6 +12,7 @@ pde_t *kpgdir;  // for use in scheduler()
 
 static int swapToFile(struct proc *p);
 static int findFreePage(struct proc *p);
+static int choosePageToSwap(void);
 
 
 // Set up CPU's kernel segment descriptors.
@@ -304,6 +305,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         for (int i = 0; i < 16; ++i){
           if(p->ramPages[i] == a){
             p->ramPages[i] = 0;
+            p->ramCounter--;
             break;
           }
         }
@@ -316,6 +318,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         for (int i = 0; i < 16; ++i){
           if(p->swapPages[i] == a){
             p->swapPages[i] = 0;
+            p->swapCounter--;
             break;
           }
         }
@@ -451,6 +454,7 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 // page replacement prefrences should be implwmented here
 static int
 swapToFile(struct proc *p){
+  
   // If init or shell
   if(p->pid < 2)
     return -1;
@@ -467,7 +471,7 @@ swapToFile(struct proc *p){
     return -1;
   
   // Choose from physical memory file to swap
-  int ramIndx = 0;
+  int ramIndx = choosePageToSwap();
   uint va = p->ramPages[ramIndx];
 
   // get PTE of chosen page
@@ -507,6 +511,8 @@ findFreePage(struct proc *p){
       break;
     }
   }
+  // cprintf("%s%d\n", "the ramCounter is: ", p->ramCounter);
+  // cprintf("%s%d\n", "the free RAM index returned: ", indx);
   return indx;
 }
 
@@ -525,11 +531,11 @@ checkIfSwapFault(uint va){
 void
 swapToRam(uint va){
   struct proc *p = myproc();
-
+  
   // If init or shell
-  if(p->pid > 2)
+  if(p->pid < 2)
     panic("swapToRam: process pid <= 2");
-
+  
   // Find page if swapFile
   int indx = -1;
   for(int i = 0; i < 16; i++){
@@ -540,7 +546,7 @@ swapToRam(uint va){
   }
   if(indx == -1)
     panic("swapToRam: requested page not found");
-
+  
   // Save page in temporary buffer
   char buf1[PGSIZE/2] = "";
   char buf2[PGSIZE/2] = "";
@@ -549,15 +555,16 @@ swapToRam(uint va){
     panic("swapToRam: couldnt read from swap file");
    if(readFromSwapFile(p, buf2, indx*PGSIZE + PGSIZE/2, PGSIZE/2) < 0)
     panic("swapToRam: couldnt read from swap file");
-
+  
   // Free space in swap file
   p->swapPages[indx] = 0;
   p->swapCounter--;
 
   // If RAM is full - swap 1 page to file
   if(p->ramCounter >= 16)
-    swapToFile(p);
-
+    if(swapToFile(p) < 0)
+      panic("swapToRam: swapToFile failed!");
+  
   // Find free space in RAM
   indx = -1;
   for(int i = 0; i < 16; i++){
@@ -568,7 +575,7 @@ swapToRam(uint va){
   }
   if(indx == -1)
     panic("swapToRam: couldnt find free space in RAM");
-
+  
   // Allocate memory in RAM
   char *mem = kalloc();
   if(mem == 0)
@@ -578,12 +585,21 @@ swapToRam(uint va){
   // Write from buffer to memory
   memmove(mem, buf1, PGSIZE/2);
   memmove(mem + PGSIZE/2, buf2, PGSIZE/2);
-
+  
   // Update PTE
   pte_t *pte = walkpgdir(p->pgdir, (char*)va, 0);
-  *pte = (uint)mem | ((PTE_FLAGS(*pte) | PTE_P) & ~PTE_PG);
+  *pte = V2P(mem) | ((PTE_FLAGS(*pte) | PTE_P) & ~PTE_PG);
+  // *pte = V2P(mem) | PTE_P | PTE_W | PTE_U;
+  lcr3(V2P(p->pgdir));  // Flush TLB
 
   // Update process paging info
   p->ramPages[indx] = va;
   p->ramCounter++;
+  
+}
+
+// @TODO: implement swapping method
+static int
+choosePageToSwap(void){
+  return 4;
 }
