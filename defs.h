@@ -9,6 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct page;
 
 // bio.c
 void            binit(void);
@@ -78,6 +79,7 @@ char*           kalloc(void);
 void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
+int 			getNumberOfFreePages(void);
 
 // kbd.c
 void            kbdintr(void);
@@ -200,3 +202,6 @@ void 			swapToRam(uint va);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+// Maximum namber of pages that we can use
+#define MAX_PAGES 1024*1024

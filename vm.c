@@ -312,7 +312,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       }
       
       *pte = 0;
-    }else if(*pte & PTE_PG){ // In case page is in swapFile
+    }else if((*pte & PTE_PG) != 0){ // In case page is in swapFile
       // Clear the place in swap array
       if(p->pgdir == pgdir){
         for (int i = 0; i < 16; ++i){
@@ -323,6 +323,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
           }
         }
       }
+      *pte = 0;
     }
   }
   return newsz;

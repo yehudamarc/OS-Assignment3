@@ -96,3 +96,11 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// Print system pages info
+int
+sys_get_pages_info(void)
+{
+	cprintf("%s%d\n", "Number of free pages: ", getNumberOfFreePages());
+	return 0;
+}

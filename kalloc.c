@@ -13,6 +13,19 @@ void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
 
+extern int getNumberOfFreePages(void);
+int totalPages;
+int freePages;
+
+// Struct for standart page
+struct page {
+  uint va;
+  int refCounter;
+};
+
+// Array containg info of all the pages we using
+struct page currentPages[MAX_PAGES];
+
 struct run {
   struct run *next;
 };
@@ -34,6 +47,16 @@ kinit1(void *vstart, void *vend)
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
   freerange(vstart, vend);
+
+  // Calculate total number of free pages
+  totalPages = (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart))/PGSIZE;
+
+  
+  // initilize current pages array
+  for(int i = 0; i < MAX_PAGES; i++){
+    currentPages[i].va = 0;
+    currentPages[i].refCounter = 0;
+  }
 }
 
 void
@@ -41,6 +64,11 @@ kinit2(void *vstart, void *vend)
 {
   freerange(vstart, vend);
   kmem.use_lock = 1;
+
+  // Continue to calculate total number of free pages
+  totalPages += (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart))/PGSIZE;
+  freePages = totalPages;
+  
 }
 
 void
@@ -72,8 +100,11 @@ kfree(char *v)
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;
+  // Update free pages counter
+  freePages--;
   if(kmem.use_lock)
     release(&kmem.lock);
+
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -87,10 +118,18 @@ kalloc(void)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    // Update free pages counter
+    freePages++;
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
+}
+
+int
+getNumberOfFreePages(void){
+  return freePages;
 }
 
