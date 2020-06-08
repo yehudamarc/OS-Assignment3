@@ -8,7 +8,6 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
-#include "proc.h"
 
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
@@ -17,16 +16,12 @@ extern char end[]; // first address after kernel loaded from ELF file
 int getNumberOfFreePages(void);
 int totalPages;
 int freePages;
-int entriesCounter;
 
-// Struct for standart page
-struct page {
-  uint va;
-  int refCounter;
-};
-
-// Array containg info of all the pages we using
-struct page currentPages[MAX_PAGES];
+// // Struct for standart page
+// struct page {
+//   uint va;
+//   int refCounter;
+// };
 
 struct run {
   struct run *next;
@@ -98,6 +93,7 @@ kfree(char *v)
   if(kmem.use_lock)
     acquire(&kmem.lock);
 
+/*
   // COW is not relevant for init and shell
   struct proc *p;
   if(isSchedActive)
@@ -105,6 +101,8 @@ kfree(char *v)
   else
     p = 0;
   if(p && p->pid > 2){
+      cprintf("%s%d\n", "kfree, process pid: " , p->pid);
+      cprintf("%s%d\n", "v: " , (uint)v );
     // find page in current pages array
     int pgindx = -1;
     for(int i = 0; i < MAX_PAGES; i++){
@@ -122,6 +120,7 @@ kfree(char *v)
     // if refrence count is more than 1, just decrease it
     if(currentPages[pgindx].refCounter > 1){
       currentPages[pgindx].refCounter--;
+      
       if(kmem.use_lock)
       release(&kmem.lock);
       return;
@@ -130,7 +129,7 @@ kfree(char *v)
     currentPages[pgindx].va = 0;
     currentPages[pgindx].refCounter = 0;
   }
-
+*/
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
 
@@ -138,7 +137,6 @@ kfree(char *v)
   r->next = kmem.freelist;
   kmem.freelist = r;
   // Update free pages counter
-  if(p && p->pid > 2)
   freePages++;
  
   if(kmem.use_lock)
@@ -160,6 +158,9 @@ kalloc(void)
   if(r){
     kmem.freelist = r->next;
 
+    // Update free pages counter
+    freePages--;
+/*
     struct proc *p;
     if(isSchedActive)
       p = myproc();
@@ -180,7 +181,13 @@ kalloc(void)
         panic("kalloc: couldnt find a free spot in currentPages");
       currentPages[pgindx].va = (uint)r;
       currentPages[pgindx].refCounter = 1;
+      // Test prints
+      cprintf("%s%d\n", "process pid: " , p->pid);
+      cprintf("%s%d\n", "r: " , (uint)r );
+      cprintf("%s%d\n", "virtual address: " , currentPages[pgindx].va);
+
     }
+    */
   }
   if(kmem.use_lock)
     release(&kmem.lock);

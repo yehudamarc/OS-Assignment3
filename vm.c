@@ -13,7 +13,8 @@ pde_t *kpgdir;  // for use in scheduler()
 static int swapToFile(struct proc *p);
 static int findFreePage(struct proc *p);
 static int choosePageToSwap(void);
-
+static void addToCurrentPages(uint va);
+static int findFreeEntry(void);
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -297,8 +298,37 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       pa = PTE_ADDR(*pte);
       if(pa == 0)
         panic("kfree");
-      char *v = P2V(pa);
-      kfree(v);
+    if(p && p->pid > 2){
+    	int indx = -1;
+    	for(int i = 0; i < MAX_PAGES; i++){
+    		if(currentPages[i].va == a){
+    			indx = i;
+    			break;
+    		}
+    	}
+    	//Didn't go throgh copyuvm, or only refrence remained
+    	if(indx == -1){
+    		char *v = P2V(pa);
+			kfree(v);
+    	}
+    	else if(currentPages[indx].refCounter == 1){
+    		char *v = P2V(pa);
+			kfree(v);
+			currentPages[indx].va = 0;
+			currentPages[indx].refCounter = 0;
+    	}
+    	else if(currentPages[indx].refCounter > 1){
+    		currentPages[indx].refCounter--;
+    	}
+    	else{
+    		panic("deallocuvm: refCounter under 1");
+    	}
+    }
+    else{
+		char *v = P2V(pa);
+		kfree(v);
+    }
+      
       
       // Clear the place in ram array
       if(p->pgdir == pgdir){
@@ -370,6 +400,7 @@ copyuvm(pde_t *pgdir, uint sz)
   pte_t *pte;
   uint pa, i, flags;
   char *mem;
+  struct proc *p = myproc();
 
   if((d = setupkvm()) == 0)
     return 0;
@@ -387,13 +418,31 @@ copyuvm(pde_t *pgdir, uint sz)
     }
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto bad;
-    memmove(mem, (char*)P2V(pa), PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
-      kfree(mem);
-      goto bad;
-    }
+
+    if(p && p->pid > 2){
+	    // COW implemtation
+	    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
+	    	goto bad;
+	    // Update currentPages
+	    addToCurrentPages(i);
+	    /*
+	    // Update PTEs
+	    *pte &= PTE_RO;
+	    pte_p newPte = walkpgdir(d, (void*)i, 0);
+	    if(newPte < 0)
+	    	panic("cpyuvm: NEW PTE havent found");
+	    *newPte &= PTE_RO;
+	    */
+	}
+	else{ // it's init or shell - ignore COW
+		if((mem = kalloc()) == 0)
+      		goto bad;
+    	memmove(mem, (char*)P2V(pa), PGSIZE);
+    	if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
+      		kfree(mem);
+      		goto bad;
+    	}
+	}
   }
   return d;
 
@@ -603,4 +652,43 @@ swapToRam(uint va){
 static int
 choosePageToSwap(void){
   return 4;
+}
+
+// Get virtual address, if exist in currentPages - increase refrence counter
+// else - insert it into currentPages with ref counter of 2
+static void
+addToCurrentPages(uint va){
+	int indx = -1;
+	for(int i = 0; i < MAX_PAGES; i++){
+		if(currentPages[i].va == va){
+			indx = i;
+			break;
+		}
+	}
+	// If couldn't find
+	if(indx == -1){
+		int freeEntry = findFreeEntry();
+		if(freeEntry < 0)
+			panic("addToCurrentPages: no free entry in currentPages");
+		// else
+		currentPages[freeEntry].va = va;
+		currentPages[freeEntry].refCounter = 2; // parent and child
+	}
+	else{
+		currentPages[indx].refCounter++;
+	}	
+}
+
+// Find free entry in currentPages array
+// if failed to find - return -1;
+static int
+findFreeEntry(void){
+	int indx = -1;
+	for(int i = 0; i < MAX_PAGES; i++){
+		if(currentPages[i].va == 0){
+			indx = i;
+			break;
+		}
+	}
+	return indx;
 }

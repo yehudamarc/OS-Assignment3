@@ -9,7 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-struct page;
+// struct page;
 
 // bio.c
 void            binit(void);
@@ -206,3 +206,13 @@ void 			swapToRam(uint va);
 // @TODO: find the correct number of MAX_PAGES
 // Maximum namber of pages that we can use
 #define MAX_PAGES 1024
+
+// COW data structure
+
+// Struct for standart page
+struct page {
+  uint va;
+  int refCounter;
+};
+// Array containg info of all the pages we using
+struct page currentPages[MAX_PAGES];
