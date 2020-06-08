@@ -8,14 +8,16 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
+#include "proc.h"
 
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
 
-extern int getNumberOfFreePages(void);
+int getNumberOfFreePages(void);
 int totalPages;
 int freePages;
+int entriesCounter;
 
 // Struct for standart page
 struct page {
@@ -57,6 +59,7 @@ kinit1(void *vstart, void *vend)
     currentPages[i].va = 0;
     currentPages[i].refCounter = 0;
   }
+
 }
 
 void
@@ -68,7 +71,7 @@ kinit2(void *vstart, void *vend)
   // Continue to calculate total number of free pages
   totalPages += (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart))/PGSIZE;
   freePages = totalPages;
-  
+
 }
 
 void
@@ -92,16 +95,52 @@ kfree(char *v)
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+
+  // COW is not relevant for init and shell
+  struct proc *p;
+  if(isSchedActive)
+    p = myproc();
+  else
+    p = 0;
+  if(p && p->pid > 2){
+    // find page in current pages array
+    int pgindx = -1;
+    for(int i = 0; i < MAX_PAGES; i++){
+      if(currentPages[i].va == (uint)v){
+        pgindx = i;
+        break;
+      }
+    }
+    if(pgindx == -1)
+      panic("kfree: couldnt fing page in currentPages");
+
+    if(currentPages[pgindx].refCounter < 1)
+      panic("kfree: refCounter is under 1");
+
+    // if refrence count is more than 1, just decrease it
+    if(currentPages[pgindx].refCounter > 1){
+      currentPages[pgindx].refCounter--;
+      if(kmem.use_lock)
+      release(&kmem.lock);
+      return;
+    }
+    // else, it's the only reference - remove from memory
+    currentPages[pgindx].va = 0;
+    currentPages[pgindx].refCounter = 0;
+  }
+
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
 
-  if(kmem.use_lock)
-    acquire(&kmem.lock);
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;
   // Update free pages counter
-  freePages--;
+  if(p && p->pid > 2)
+  freePages++;
+ 
   if(kmem.use_lock)
     release(&kmem.lock);
 
@@ -120,8 +159,28 @@ kalloc(void)
   r = kmem.freelist;
   if(r){
     kmem.freelist = r->next;
-    // Update free pages counter
-    freePages++;
+
+    struct proc *p;
+    if(isSchedActive)
+      p = myproc();
+    else
+      p = 0;
+    if(p && p->pid > 2){
+      // Update free pages counter
+      freePages--;
+      // Update currentPages array
+      int pgindx = -1;
+       for(int i = 0; i < MAX_PAGES; i++){
+        if(currentPages[i].va == 0){
+          pgindx = i;
+          break;
+        }
+      }
+      if(pgindx == -1)
+        panic("kalloc: couldnt find a free spot in currentPages");
+      currentPages[pgindx].va = (uint)r;
+      currentPages[pgindx].refCounter = 1;
+    }
   }
   if(kmem.use_lock)
     release(&kmem.lock);

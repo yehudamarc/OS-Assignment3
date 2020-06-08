@@ -366,6 +366,9 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
+
+  // Turn on flag
+  isSchedActive = 1;
   
   for(;;){
     // Enable interrupts on this processor.

@@ -203,5 +203,6 @@ void 			swapToRam(uint va);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
+// @TODO: find the correct number of MAX_PAGES
 // Maximum namber of pages that we can use
-#define MAX_PAGES 1024*1024
+#define MAX_PAGES 1024

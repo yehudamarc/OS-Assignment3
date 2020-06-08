@@ -62,3 +62,6 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+// flag for initialization of the system
+int isSchedActive;
