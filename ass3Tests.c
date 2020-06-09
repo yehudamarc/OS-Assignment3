@@ -78,17 +78,16 @@ char *a[16];
 */
 
 	// -------------- COW Test -------------------
-	/*
-	int i;
+	
 	char *arr[30];
 	char input[10];
 	// Allocate all remaining 13 physical pages
 	get_pages_info();
-	for (i = 0; i < 14; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		arr[i] = sbrk(PGSIZE);
 		printf(1, "arr[%d]=0x%x\n", i, arr[i]);
 	}
-	printf(1, "Called sbrk(PGSIZE) 14 times - all physical pages taken.\nPress any key...\n");
+	printf(1, "Called sbrk(PGSIZE) 10 times - all physical pages taken.\nPress any key...\n");
 	getpid();
 	get_pages_info();	
 	gets(input, 10);
@@ -97,9 +96,9 @@ char *a[16];
 	if (fork()==0){
 		get_pages_info();
 	//printf(1, "Called sbrk(PGSIZE) for the X time, a page fault should occur and one page in swap file.\n");
-		printf(1, "before: %s", arr[j][2]);
+		printf(1, "before: %s\n", arr[j][2]);
 		arr[j][2] = 'k';
-		printf(1, "after: %s", arr[j][2]);
+		printf(1, "after: %s\n", arr[j][2]);
 	
 		get_pages_info();
 		getpid();
@@ -107,11 +106,15 @@ char *a[16];
 	}
 	wait();
 	get_pages_info();
-	exit();
+	
+	printf(1, "COW test 1 passed");
+	sleep(100);
 
-	*/
+	
 
-	// --------------
+	// -------------- Fork Test ----------
+
+	printf(1, "Fork test ...\n");
 
 	if(fork() == 0){
 		printf(1, "it's child\n");
@@ -123,5 +126,25 @@ char *a[16];
 	}
 
 	wait();
+	
+	printf(1, "Fork test passed\n");
+	sleep(100);
+
+	// ------------ COW test 2 ------------------
+
+	printf(1, "COW test 2 ...\n");
+
+	char *arr2[60000];
+
+	for (int i = 0; i < 60000; ++i) {
+		arr2[i] = sbrk(PGSIZE);
+		if(i < 10)
+			printf(1, "arr[%d]=0x%x\n", i, arr2[i]);
+	}
+
+	printf(1, "COW test 2 passed\n");
+	sleep(100);
+
 	exit();
+
 }
