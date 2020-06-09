@@ -82,6 +82,10 @@ trap(struct trapframe *tf)
       swapToRam(PGROUNDDOWN(rcr2()));
       break;
     }
+    if(checkIfCowFault(PGROUNDDOWN(rcr2()))){
+    	copyOnWrite(PGROUNDDOWN(rcr2()));
+    	break;
+    }
 
   //PAGEBREAK: 13
   default:

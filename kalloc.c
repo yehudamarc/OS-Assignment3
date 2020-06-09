@@ -17,12 +17,6 @@ int getNumberOfFreePages(void);
 int totalPages;
 int freePages;
 
-// // Struct for standart page
-// struct page {
-//   uint va;
-//   int refCounter;
-// };
-
 struct run {
   struct run *next;
 };
@@ -51,7 +45,7 @@ kinit1(void *vstart, void *vend)
   
   // initilize current pages array
   for(int i = 0; i < MAX_PAGES; i++){
-    currentPages[i].va = 0;
+    currentPages[i].va = -1;
     currentPages[i].refCounter = 0;
   }
 

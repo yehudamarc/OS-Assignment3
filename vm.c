@@ -15,6 +15,7 @@ static int findFreePage(struct proc *p);
 static int choosePageToSwap(void);
 static void addToCurrentPages(uint va);
 static int findFreeEntry(void);
+static int findInCurrentPages(uint va);
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -299,6 +300,9 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       if(pa == 0)
         panic("kfree");
     if(p && p->pid > 2){
+    	// Test prints
+    	// cprintf("%s%d\n", "process pid: " , p->pid);
+    	// cprintf("%s%d\n", "virtual address: " , a);
     	int indx = -1;
     	for(int i = 0; i < MAX_PAGES; i++){
     		if(currentPages[i].va == a){
@@ -306,6 +310,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     			break;
     		}
     	}
+    	// cprintf("%s%d\n", "index chosen: " , indx);
     	//Didn't go throgh copyuvm, or only refrence remained
     	if(indx == -1){
     		char *v = P2V(pa);
@@ -425,14 +430,16 @@ copyuvm(pde_t *pgdir, uint sz)
 	    	goto bad;
 	    // Update currentPages
 	    addToCurrentPages(i);
-	    /*
+	    
 	    // Update PTEs
 	    *pte &= PTE_RO;
-	    pte_p newPte = walkpgdir(d, (void*)i, 0);
+	    *pte &= ~PTE_W;
+	    pte_t *newPte = walkpgdir(d, (void*)i, 0);
 	    if(newPte < 0)
 	    	panic("cpyuvm: NEW PTE havent found");
 	    *newPte &= PTE_RO;
-	    */
+	    *newPte &= ~PTE_W;
+	    
 	}
 	else{ // it's init or shell - ignore COW
 		if((mem = kalloc()) == 0)
@@ -544,8 +551,30 @@ swapToFile(struct proc *p){
   *pte |= PTE_PG;       // Turn on
   lcr3(V2P(p->pgdir));  // Flush TLB 
 
-  // Free memory
-  kfree((char*) P2V(PTE_ADDR(*pte)));
+  // if read-only as reult of COW
+  if(*pte & PTE_RO){
+	  *pte &= ~PTE_RO;       // Turn off
+	  *pte |= PTE_W; 		 // Turn on
+	  lcr3(V2P(p->pgdir));  // Flush TLB
+
+	  // Check if is in current pages table
+	  int indx = findInCurrentPages(va);
+
+	  if(indx < 0){
+	  	// Not in current pages table
+	  	panic("swapToFile: PTE_RO on, but not in current pages table");
+	  	// kfree((char*) P2V(PTE_ADDR(*pte)));
+	  }else if(currentPages[indx].refCounter == 1){
+	  	// It's the only reference
+	  	currentPages[indx].va = 0;
+	  	currentPages[indx].refCounter = 0;
+	  	kfree((char*) P2V(PTE_ADDR(*pte)));
+	  }else {
+	  	currentPages[indx].refCounter--;
+	  }
+	}
+  else // Free memory
+  	kfree((char*) P2V(PTE_ADDR(*pte)));
 
   return 0;
 }
@@ -581,6 +610,8 @@ checkIfSwapFault(uint va){
 void
 swapToRam(uint va){
   struct proc *p = myproc();
+
+  // @TODO: possible to add check for COW (shouldnt be)
   
   // If init or shell
   if(p->pid < 2)
@@ -685,10 +716,85 @@ static int
 findFreeEntry(void){
 	int indx = -1;
 	for(int i = 0; i < MAX_PAGES; i++){
-		if(currentPages[i].va == 0){
+		if(currentPages[i].va == -1){
 			indx = i;
 			break;
 		}
 	}
 	return indx;
+}
+
+// Given virtual address, find the corresponding 
+// entry in currentPages table
+static int
+findInCurrentPages(uint va){
+	int ret = -1;
+	for (int i = 0; i < MAX_PAGES; ++i)
+	{
+		if(currentPages[i].va == va){
+			ret = i;
+			break;
+		}
+	}
+	return ret;
+}
+
+// Check if file is read-only from COW
+int
+checkIfCowFault(uint va){
+  pde_t* pgdir = myproc()->pgdir;
+  pde_t *pde = &pgdir[PDX(va)];
+  pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+  pte_t * pte = &pgtab[PTX(va)];
+
+  return !(*pte & PTE_W) && (*pte & PTE_RO);
+}
+
+// Refered from trap when getting COW page fault
+// make writeable copy of the page
+void
+copyOnWrite(uint va){
+	struct proc *p = myproc();
+	pte_t *pte;
+	char *mem;
+
+	if((pte = walkpgdir(p->pgdir, (void *) va, 0)) == 0)
+      panic("copyuvm: pte should exist");
+  // Check that file is present
+  if(!(*pte & PTE_P))
+  	panic("copyOnWrite: file is not present");
+  // Check it is COW fault
+  if((*pte & PTE_W) || !(*pte & PTE_RO))
+  	panic("copyOnWrite: not COW fault");
+
+  int indx = findInCurrentPages(va);
+  if(indx < 0)
+  	panic("copyOnWrite: couldnt find page in currentPages");
+  if(currentPages[indx].refCounter < 1)
+  	panic("copyOnWrite: refCounter under 1");
+  else if(currentPages[indx].refCounter == 1){
+  	currentPages[indx].va = 0;
+  	currentPages[indx].refCounter = 0;
+  	*pte &= PTE_W;
+  	*pte &= ~PTE_RO;
+  	lcr3(V2P(p->pgdir));  // Flush TLB
+  }else{
+  	// Copy page
+  	if((mem = kalloc()) == 0){
+  		// @TODO: panic or exit?
+  		exit();
+  		return;
+  	}
+  	uint pa = PTE_ADDR(*pte);
+  	uint flags = PTE_FLAGS(*pte);
+  	memmove(mem, (char*)P2V(pa), PGSIZE);
+
+  	*pte  = V2P(mem) | flags;
+  	*pte &= PTE_W;
+  	*pte &= ~PTE_RO;
+  	lcr3(V2P(p->pgdir));  // Flush TLB
+
+  	currentPages[indx].refCounter--;
+  }
+
 }

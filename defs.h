@@ -199,6 +199,8 @@ int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
 int 			checkIfSwapFault(uint va);
 void 			swapToRam(uint va);
+int 			checkIfCowFault(uint va);
+void 			copyOnWrite(uint va);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
