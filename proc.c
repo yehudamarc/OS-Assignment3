@@ -114,11 +114,18 @@ found:
 
   // Initilize fields
   for(int i = 0; i < 16; i++){
-    p->swapPages[i] = 0;
-    p->ramPages[i] = 0;
+    p->swapPages[i] = -1;
+    p->ramPages[i].va = -1;
+    p->ramPages[i].counter = 0;
   }
   p->ramCounter = 0;
   p->swapCounter = 0;
+
+  // struct pageLink *currLink = p->pageQueue;
+  // struct pageLink *oldLink;
+  // while(currLink != 0){}
+
+  // p->pageQueue = malloc(sizeof(struct pageLink));
 
   if(p->pid > 2)
     createSwapFile(p);
@@ -239,7 +246,8 @@ fork(void)
     cprintf("break 3 \n");
     // Copy parent's state
     for(int j = 0; j < 16; j++){
-      np->ramPages[j] = curproc->ramPages[j];
+      np->ramPages[j].va = curproc->ramPages[j].va;
+      np->ramPages[j].counter = curproc->ramPages[j].counter;
       np->swapPages[j] = curproc->swapPages[j];
     }
     np->swapCounter = curproc->swapCounter;
@@ -333,8 +341,9 @@ wait(void)
         p->killed = 0;
         // Reset paging fields
         for(int i = 0; i < 16; i++){
-          p->swapPages[i] = 0;
-          p->ramPages[i] = 0;
+          p->swapPages[i] = -1;
+          p->ramPages[i].va = -1;
+          p->ramPages[i].counter = 0;
         }
         p->swapCounter = 0;
         p->ramCounter = 0;

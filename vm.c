@@ -12,10 +12,17 @@ pde_t *kpgdir;  // for use in scheduler()
 
 static int swapToFile(struct proc *p);
 static int findFreePage(struct proc *p);
-static int choosePageToSwap(void);
+static int choosePageToSwap(struct proc *p);
 static void addToCurrentPages(uint va);
 static int findFreeEntry(void);
 static int findInCurrentPages(uint va);
+static void swapRamPages(struct proc *p, int i, int j);
+static void removeFromRamArray(struct proc *p, uint va);
+static int NFUAlgorithm(struct proc *p);
+static int LAPAlgorithm(struct proc *p);
+static int SCFIFOAlgorithm(struct proc *p);
+static int AQAlgorithm(struct proc *p);
+static int countSetBits(uint n);
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -228,6 +235,9 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
+	#if SELECTION==NONE
+	allocuvm_none(pgdir, oldsz, newsz);
+	#endif
   char *mem;
   uint a;
   // @TODO: what if it is another proccess?
@@ -269,7 +279,22 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       int indx = findFreePage(p);
       if(indx == -1)
         panic("alocuvm: no free space in ramPages!");
-      p->ramPages[indx] = a;
+      #if SELECTION == NFUA
+      	p->ramPages[indx].va = a;
+      	p->ramPages[indx].counter = 0;
+      #endif
+      #if SELECTION == LAPA
+      	p->ramPages[indx].va = a;
+      	p->ramPages[indx].counter = 0xFFFFFFFF;
+      #endif
+      #if SELECTION == SCFIFO || SELECTION == QA
+      	// Update queue
+      	for(int i = indx; i >= 0; i--){
+      		swapRamPages(p, i-1, i);
+      	}
+      	p->ramPages[0].va = a;
+      	p->ramPages[0].counter = 0;
+      #endif
       p->ramCounter++;
     }
   }
@@ -335,25 +360,19 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 		kfree(v);
     }
       
-      
+    //#if SELECTION != NONE
       // Clear the place in ram array
       if(p->pgdir == pgdir){
-        for (int i = 0; i < 16; ++i){
-          if(p->ramPages[i] == a){
-            p->ramPages[i] = 0;
-            p->ramCounter--;
-            break;
-          }
-        }
+        removeFromRamArray(p, a);
       }
-      
+    //#endif
       *pte = 0;
     }else if((*pte & PTE_PG) != 0){ // In case page is in swapFile
       // Clear the place in swap array
       if(p->pgdir == pgdir){
         for (int i = 0; i < 16; ++i){
           if(p->swapPages[i] == a){
-            p->swapPages[i] = 0;
+            p->swapPages[i] = -1;
             p->swapCounter--;
             break;
           }
@@ -436,11 +455,13 @@ copyuvm(pde_t *pgdir, uint sz)
 	    // Update PTEs
 	    *pte |= PTE_RO;
 	    *pte &= ~PTE_W;
+	    lcr3(V2P(p->pgdir));  // Flush TLB
 	    pte_t *newPte = walkpgdir(d, (void*)i, 0);
 	    if(newPte == 0)
 	    	panic("cpyuvm: NEW PTE havent found");
 	    *newPte |= PTE_RO;
 	    *newPte &= ~PTE_W;
+	    lcr3(V2P(d));  // Flush TLB
 	    
 	}
 	else{ // it's init or shell - ignore COW
@@ -521,7 +542,7 @@ swapToFile(struct proc *p){
   // Find free space in swap file
   int indx = -1;
   for(int i = 0; i < 16; i++){
-    if(p->swapPages[i] == 0){
+    if(p->swapPages[i] == -1){
       indx = i;
       break;
     }
@@ -530,8 +551,10 @@ swapToFile(struct proc *p){
     return -1;
   
   // Choose from physical memory file to swap
-  int ramIndx = choosePageToSwap();
-  uint va = p->ramPages[ramIndx];
+  int ramIndx = choosePageToSwap(p);
+  if(ramIndx == -1)
+  	panic("swapToFile: coudlnt find page to swap");
+  uint va = p->ramPages[ramIndx].va;
 
   // get PTE of chosen page
   pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
@@ -543,7 +566,8 @@ swapToFile(struct proc *p){
     panic("swapToFile: couldnt write to file!");
   
   // Update paging info
-  p->ramPages[ramIndx] = 0;
+  p->ramPages[ramIndx].va = -1;
+  p->ramPages[ramIndx].counter = 0;
   p->ramCounter--;
   p->swapPages[indx] = va;
   p->swapCounter++;
@@ -587,7 +611,7 @@ static int
 findFreePage(struct proc *p){
   int indx = -1;
   for(int i = 0; i < 16; i++){
-    if(p->ramPages[i] == 0){
+    if(p->ramPages[i].va == -1){
       indx = i;
       break;
     }
@@ -640,7 +664,7 @@ swapToRam(uint va){
     panic("swapToRam: couldnt read from swap file");
   
   // Free space in swap file
-  p->swapPages[indx] = 0;
+  p->swapPages[indx] = -1;
   p->swapCounter--;
 
   // If RAM is full - swap 1 page to file
@@ -649,13 +673,8 @@ swapToRam(uint va){
       panic("swapToRam: swapToFile failed!");
   
   // Find free space in RAM
-  indx = -1;
-  for(int i = 0; i < 16; i++){
-    if(p->ramPages[i] == 0){
-      indx = i;
-      break;
-    }
-  }
+  indx = findFreePage(p);
+
   if(indx == -1)
     panic("swapToRam: couldnt find free space in RAM");
   
@@ -676,15 +695,19 @@ swapToRam(uint va){
   lcr3(V2P(p->pgdir));  // Flush TLB
 
   // Update process paging info
-  p->ramPages[indx] = va;
+  #if SELECTION == NFUA || SELECTION == LAPA
+  p->ramPages[indx].va = va;
+  p->ramPages[indx].counter = 0;
+  #endif
+  #if SELECTION == SCFIFO || SELECTION == AQ
+  	for(int i = indx; i >= 0; i--){
+      swapRamPages(p, i-1, i);
+	}
+   	p->ramPages[0].va = va;
+    p->ramPages[0].counter = 0;
+  #endif
   p->ramCounter++;
   
-}
-
-// @TODO: implement swapping method
-static int
-choosePageToSwap(void){
-  return 4;
 }
 
 // Get virtual address, if exist in currentPages - increase refrence counter
@@ -798,5 +821,215 @@ copyOnWrite(uint va){
 
   	currentPages[indx].refCounter--;
   }
+
+}
+
+// Get index of 2 pages in ram array and swap them
+static void
+swapRamPages(struct proc *p, int i, int j){
+	struct ramPage temp = {0, 0};
+	temp.va = p->ramPages[i].va;
+	temp.counter = p->ramPages[i].counter;
+	p->ramPages[i].va = p->ramPages[j].va;
+	p->ramPages[i].counter = p->ramPages[j].counter;
+	p->ramPages[j].va = temp.va;
+	p->ramPages[j].counter = temp.counter;
+}
+
+static void
+removeFromRamArray(struct proc *p, uint va){
+	for(int i = 0; i < 16; i++){
+		if(p->ramPages[i].va == va){
+			p->ramPages[i].va = -1;
+			p->ramPages[i].counter = 0;
+			// Currect queue
+			#if SELECTION == NFUA || SELECTION == AQ
+				for(int j = i; j < 15; j++){
+					swapRamPages(p, j, j+1);
+				}
+				break;
+			#endif
+		}
+	}
+}
+
+// Returning index in ramPages of the page we want to swap to 
+// file, choose according to the selection's algorithm that was chosen
+static int
+choosePageToSwap(struct proc *p){
+  #if SELECTION == NFUA
+  return NFUAlgorithm(p);
+  #endif
+  #if SELECTION == LAPA
+  return LAPAlgorithm(p);
+  #endif
+  #if SELECTION == SCFIFO
+  // Try twice in case all the pages have access flag on
+  int ret;
+  ret = SCFIFOAlgorithm(p);
+  if(ret == -1)
+  	return SCFIFOAlgorithm(p);
+  return ret;
+  #endif
+  #if SELECTION == AQ
+  return AQAlgorithm(p);
+  #endif
+}
+
+// Implementation of NFU + AGING algorithm 
+static int
+NFUAlgorithm(struct proc *p){
+	int ret = -1;
+	uint min = MAXINT;
+	for(int i = 0; i < 16; i++){
+		if(p->ramPages[i].va != -1 && p->ramPages[i].counter < min){
+			min = p->ramPages[i].counter;
+			ret = i;
+		}
+	}
+	return ret;
+}
+
+static int
+LAPAlgorithm(struct proc *p){
+	int ret = -1;
+	int minOnes = MAXINT;
+	uint minCounter = MAXINT;
+	int countBits;
+	for(int i = 0; i < 16; i++){
+		if(p->ramPages[i].va != -1){
+			countBits = countSetBits(p->ramPages[i].counter);
+			if(countBits < minOnes || (countBits == minOnes && p->ramPages[i].counter < minCounter)){
+				minOnes = countBits;
+				minCounter = p->ramPages[i].counter;
+				ret = i;
+			}
+		}
+	}
+	return ret;
+}
+
+// Count the number of 1 in given number
+static int
+countSetBits(uint n) 
+{ 
+    uint count = 0; 
+    while (n) { 
+        count += n & 1; 
+        n >>= 1; 
+    } 
+    return count; 
+} 
+
+// Implementation of Second Chance FIFO algorithm
+static int
+SCFIFOAlgorithm(struct proc *p){
+	pte_t *pte;
+	for(int i = 0; i < 16; i++){
+		if(p->ramPages[i].va != -1){
+			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
+			if(pte == 0)
+				panic("SCFIFOAlgorithm: couldnt find PTE");
+			if(*pte & PTE_A){
+				*pte &= ~PTE_A;
+				continue;
+			}else
+			return i;
+		}
+	}
+	return -1;
+}
+
+// Implementation of Advenced Queue algorithm
+static int
+AQAlgorithm(struct proc *p){
+	if(p->ramPages[0].va == -1)
+		return -1;
+	return 0; // first index
+}
+
+// original allocuvm - without paging framework
+int
+allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz)
+{
+  char *mem;
+  uint a;
+
+  if(newsz >= KERNBASE)
+    return 0;
+  if(newsz < oldsz)
+    return oldsz;
+
+  a = PGROUNDUP(oldsz);
+  for(; a < newsz; a += PGSIZE){
+    mem = kalloc();
+    if(mem == 0){
+      cprintf("allocuvm out of memory\n");
+      deallocuvm(pgdir, newsz, oldsz);
+      return 0;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+      cprintf("allocuvm out of memory (2)\n");
+      deallocuvm(pgdir, newsz, oldsz);
+      kfree(mem);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+// Called from trap, update paging data according to
+// Paging scheme selected
+void
+UpdatePagingInfo(uint va){
+	
+	#if SELECTION == NONE || SELECTION == SCFIFO
+		return;
+	#endif
+
+	struct proc *p = myproc();
+	pte_t *pte;
+	pte_t *nextPte;
+
+	#if SELECTION == NFUA || SELECTION == LAPA
+	for(int i = 0; i < 16; i++){
+			if(p->ramPages[i].va == -1)
+				continue;
+			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
+			if(pte == 0)
+				panic("UpdatePagingInfo: coudlnt fing PTE");
+			p->ramPages[i].counter >>= 1; // shift right
+			if(*pte & PTE_A){
+				p->ramPages[i].counter &= 0x80000000; // turn on MSB
+				*pte &= PTE_A;
+				lcr3(V2P(p->pgdir));
+			}
+	}
+	#endif
+
+	#if SELECTION == AQ
+		for(int i = 15; i >= 0; i--){
+			if(p->ramPages[i].va == -1)
+				continue;
+			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
+			if(pte == 0)
+				panic("UpdatePagingInfo: coudlnt fing PTE");
+			// If Access bit is on
+			if(*pte & PTE_A){
+				*pte &= ~PTE_A; //Turn off
+				if(i == 0) // First in queue
+					continue;
+				nextPte = walkpgdir(p->pgdir, (char*)p->ramPages[i-1].va, 0);
+				if(nextPte == 0)
+					panic("UpdatePagingInfo: coudlnt fing next PTE");
+				if(*nextPte & PTE_A)
+					continue;
+				swapRamPages(p, i, i-1);
+				i--;
+			}
+		}
+		lcr3(V2P(p->pgdir));
+	#endif
 
 }

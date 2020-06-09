@@ -35,10 +35,11 @@ exec(char *path, char **argv)
   uint ramCounterBackup = curproc->ramCounter;
   // uint swapCounterBackup = curproc->swapCounter;
   // uint swapPagesBackup[16];
-  uint ramPagesBackup[16];
+  struct ramPage ramPagesBackup[16];
   for(int i = 0; i < 16; i++){
     // swapPagesBackup[i] = curproc->swapPages[i];
-    ramPagesBackup[i] = curproc->ramPages[i];
+    ramPagesBackup[i].va = curproc->ramPages[i].va;
+    ramPagesBackup[i].counter = curproc->ramPages[i].counter;
   }
 
   // Clean paging info and structures
@@ -48,7 +49,8 @@ exec(char *path, char **argv)
   curproc->ramCounter = 0;
   for(int i = 0; i < 16; i++){
     curproc->swapPages[i] = 0;
-    curproc->ramPages[i] = 0;
+    curproc->ramPages[i].va = -1;
+    curproc->ramPages[i].counter = 0;
   }
 
   // Check ELF header
@@ -140,7 +142,8 @@ exec(char *path, char **argv)
   // curproc->swapCounter = swapCounterBackup;
   for(int i = 0; i < 16; i++){
     // curproc->swapPages[i] = swapPagesBackup[i];
-    curproc->ramPages[i] = ramPagesBackup[i];
+    curproc->ramPages[i].va = ramPagesBackup[i].va;
+    curproc->ramPages[i].counter = ramPagesBackup[i].counter;
   }
 
   return -1;

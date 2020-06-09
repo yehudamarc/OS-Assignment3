@@ -9,7 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-// struct page;
+struct pageLink;
 
 // bio.c
 void            binit(void);
@@ -197,10 +197,12 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
-int 			checkIfSwapFault(uint va);
-void 			swapToRam(uint va);
-int 			checkIfCowFault(uint va);
-void 			copyOnWrite(uint va);
+int 			checkIfSwapFault(uint);
+void 			swapToRam(uint);
+int 			checkIfCowFault(uint);
+void 			copyOnWrite(uint);
+int 			allocuvm_none(pde_t *, uint, uint);
+void 			UpdatePagingInfo(uint);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
@@ -208,6 +210,8 @@ void 			copyOnWrite(uint va);
 // @TODO: find the correct number of MAX_PAGES
 // Maximum namber of pages that we can use
 #define MAX_PAGES 1024
+
+#define MAXINT 2147483647
 
 // COW data structure
 
@@ -218,3 +222,5 @@ struct page {
 };
 // Array containg info of all the pages we using
 struct page currentPages[MAX_PAGES];
+
+// @TODO: synchronize currentPages array

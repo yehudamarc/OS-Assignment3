@@ -34,6 +34,12 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+// Struct for pages in ram
+struct ramPage {
+	uint va;
+	uint counter;
+};
+
 // Per-process state
 struct proc {
   uint sz;                     // Size of process memory (bytes)
@@ -52,9 +58,10 @@ struct proc {
   //Swap file. must initiate with create swap file
   struct file *swapFile;      //page file
   uint swapPages[16];         // index is index in swapFile, content is va
-  uint ramPages[16];          // contain va's for pages in ram
+  struct ramPage ramPages[16];// contain va's for pages in ram
   uint ramCounter;            // Number of pages in RAM
   uint swapCounter;           // Number of pages in swapFile
+  struct pageLink *pageQueue; // Pointer to head of the RAM pages queue
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -65,3 +72,10 @@ struct proc {
 
 // flag for initialization of the system
 int isSchedActive;
+
+// Struct for managing page replacement scheme
+struct pageLink {
+	uint va;
+	uint counter;
+	struct pageLink *next;
+};

@@ -78,7 +78,8 @@ trap(struct trapframe *tf)
     lapiceoi();
     break;
   case T_PGFLT:
-      	cprintf("break 5\n");
+  	cprintf("break 5\n");
+  	UpdatePagingInfo(PGROUNDDOWN(rcr2()));
     if(checkIfSwapFault(PGROUNDDOWN(rcr2()))){
     	cprintf("break 6\n");
     	cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
