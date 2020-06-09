@@ -200,6 +200,8 @@ fork(void)
     return -1;
   }
 
+  cprintf("Hey, i'm in fork! \n");
+
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
@@ -207,6 +209,7 @@ fork(void)
     np->state = UNUSED;
     return -1;
   }
+  cprintf("break 1 \n");
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
@@ -222,7 +225,7 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
-  
+  cprintf("break 2 \n");
   // Copy swapFile if exist
   if(curproc->swapFile != 0){
 
@@ -233,6 +236,7 @@ fork(void)
         panic("fork: couldnt write to swap file");
       i++;
     }
+    cprintf("break 3 \n");
     // Copy parent's state
     for(int j = 0; j < 16; j++){
       np->ramPages[j] = curproc->ramPages[j];
@@ -241,7 +245,7 @@ fork(void)
     np->swapCounter = curproc->swapCounter;
     np->ramCounter = curproc->ramCounter;
   }
-  
+  cprintf("break 4 \n");
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;

@@ -51,6 +51,7 @@ main(int argc, char *argv[]){
 
 */
 
+/*
 char *a[16];
   int i;
   int j;
@@ -74,6 +75,53 @@ char *a[16];
   printf(1,"%c\n",a[2][0]);
   printf(1,"%c\n",a[14][0]);
   printf(1,"%c\n",a[15][3333]);
+*/
 
+	// -------------- COW Test -------------------
+	/*
+	int i;
+	char *arr[30];
+	char input[10];
+	// Allocate all remaining 13 physical pages
+	get_pages_info();
+	for (i = 0; i < 14; ++i) {
+		arr[i] = sbrk(PGSIZE);
+		printf(1, "arr[%d]=0x%x\n", i, arr[i]);
+	}
+	printf(1, "Called sbrk(PGSIZE) 14 times - all physical pages taken.\nPress any key...\n");
+	getpid();
+	get_pages_info();	
+	gets(input, 10);
+	//test cow after fork
+	int j=0;
+	if (fork()==0){
+		get_pages_info();
+	//printf(1, "Called sbrk(PGSIZE) for the X time, a page fault should occur and one page in swap file.\n");
+		printf(1, "before: %s", arr[j][2]);
+		arr[j][2] = 'k';
+		printf(1, "after: %s", arr[j][2]);
+	
+		get_pages_info();
+		getpid();
+		exit();
+	}
+	wait();
+	get_pages_info();
+	exit();
+
+	*/
+
+	// --------------
+
+	if(fork() == 0){
+		printf(1, "it's child\n");
+		exit();
+		if(fork() == 0)
+			exit();
+		wait();
+		exit();
+	}
+
+	wait();
 	exit();
 }

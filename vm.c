@@ -283,6 +283,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 int
 deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
+	cprintf("break: deallocuvm\n");
   pte_t *pte;
   uint a, pa;
   struct proc *p = myproc();
@@ -301,8 +302,8 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         panic("kfree");
     if(p && p->pid > 2){
     	// Test prints
-    	// cprintf("%s%d\n", "process pid: " , p->pid);
-    	// cprintf("%s%d\n", "virtual address: " , a);
+    	cprintf("%s%d\n", "process pid: " , p->pid);
+    	cprintf("%s%d\n", "virtual address: " , a);
     	int indx = -1;
     	for(int i = 0; i < MAX_PAGES; i++){
     		if(currentPages[i].va == a){
@@ -310,7 +311,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     			break;
     		}
     	}
-    	// cprintf("%s%d\n", "index chosen: " , indx);
+    	cprintf("%s%d\n", "index chosen: " , indx);
     	//Didn't go throgh copyuvm, or only refrence remained
     	if(indx == -1){
     		char *v = P2V(pa);
@@ -319,7 +320,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     	else if(currentPages[indx].refCounter == 1){
     		char *v = P2V(pa);
 			kfree(v);
-			currentPages[indx].va = 0;
+			currentPages[indx].va = -1;
 			currentPages[indx].refCounter = 0;
     	}
     	else if(currentPages[indx].refCounter > 1){
@@ -401,6 +402,7 @@ clearpteu(pde_t *pgdir, char *uva)
 pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
+	cprintf("break: copyuvm\n");
   pde_t *d;
   pte_t *pte;
   uint pa, i, flags;
@@ -432,12 +434,12 @@ copyuvm(pde_t *pgdir, uint sz)
 	    addToCurrentPages(i);
 	    
 	    // Update PTEs
-	    *pte &= PTE_RO;
+	    *pte |= PTE_RO;
 	    *pte &= ~PTE_W;
 	    pte_t *newPte = walkpgdir(d, (void*)i, 0);
-	    if(newPte < 0)
+	    if(newPte == 0)
 	    	panic("cpyuvm: NEW PTE havent found");
-	    *newPte &= PTE_RO;
+	    *newPte |= PTE_RO;
 	    *newPte &= ~PTE_W;
 	    
 	}
@@ -566,7 +568,7 @@ swapToFile(struct proc *p){
 	  	// kfree((char*) P2V(PTE_ADDR(*pte)));
 	  }else if(currentPages[indx].refCounter == 1){
 	  	// It's the only reference
-	  	currentPages[indx].va = 0;
+	  	currentPages[indx].va = -1;
 	  	currentPages[indx].refCounter = 0;
 	  	kfree((char*) P2V(PTE_ADDR(*pte)));
 	  }else {
@@ -759,7 +761,7 @@ copyOnWrite(uint va){
 	char *mem;
 
 	if((pte = walkpgdir(p->pgdir, (void *) va, 0)) == 0)
-      panic("copyuvm: pte should exist");
+      panic("copyOnWrite: pte should exist");
   // Check that file is present
   if(!(*pte & PTE_P))
   	panic("copyOnWrite: file is not present");
@@ -773,9 +775,9 @@ copyOnWrite(uint va){
   if(currentPages[indx].refCounter < 1)
   	panic("copyOnWrite: refCounter under 1");
   else if(currentPages[indx].refCounter == 1){
-  	currentPages[indx].va = 0;
+  	currentPages[indx].va = -1;
   	currentPages[indx].refCounter = 0;
-  	*pte &= PTE_W;
+  	*pte |= PTE_W;
   	*pte &= ~PTE_RO;
   	lcr3(V2P(p->pgdir));  // Flush TLB
   }else{
@@ -790,7 +792,7 @@ copyOnWrite(uint va){
   	memmove(mem, (char*)P2V(pa), PGSIZE);
 
   	*pte  = V2P(mem) | flags;
-  	*pte &= PTE_W;
+  	*pte |= PTE_W;
   	*pte &= ~PTE_RO;
   	lcr3(V2P(p->pgdir));  // Flush TLB
 
