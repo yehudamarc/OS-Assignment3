@@ -218,3 +218,5 @@ struct page {
 };
 // Array containg info of all the pages we using
 struct page currentPages[MAX_PAGES];
+
+// @TODO: synchronize currentPages array
