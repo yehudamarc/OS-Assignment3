@@ -235,9 +235,20 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
-	#if SELECTION==NONE
-	allocuvm_none(pgdir, oldsz, newsz);
-	#endif
+  // cprintf("break: allocuvm\n");
+  if (SELECTION==SCFIFO){
+  // cprintf("selection==scfifo\n");
+  }
+  if (SELECTION==NFUA){
+  // cprintf("selection==nfua\n");
+  }
+  if (SELECTION==LAPA){
+  // cprintf("selection==lapa\n");
+  }
+	if (SELECTION==NONE){
+  // cprintf("selection==none\n");
+	return allocuvm_none(pgdir, oldsz, newsz);
+	}
   char *mem;
   uint a;
   // @TODO: what if it is another proccess?
@@ -279,22 +290,23 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       int indx = findFreePage(p);
       if(indx == -1)
         panic("alocuvm: no free space in ramPages!");
-      #if SELECTION == NFUA
+      if (SELECTION == NFUA){
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0;
-      #endif
-      #if SELECTION == LAPA
+      }
+      if (SELECTION == LAPA){
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0xFFFFFFFF;
-      #endif
-      #if SELECTION == SCFIFO || SELECTION == QA
+        // cprintf("%s%d%s%d\n", "allocuvm: ramPages ", indx, " counter: ", p->ramPages[indx].counter);
+      }
+      if (SELECTION == SCFIFO || SELECTION == AQ){
       	// Update queue
       	for(int i = indx; i >= 0; i--){
       		swapRamPages(p, i-1, i);
       	}
       	p->ramPages[0].va = a;
       	p->ramPages[0].counter = 0;
-      #endif
+      }
       p->ramCounter++;
     }
   }
@@ -308,7 +320,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 int
 deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
-	cprintf("break: deallocuvm\n");
+	// cprintf("break: deallocuvm\n");
   pte_t *pte;
   uint a, pa;
   struct proc *p = myproc();
@@ -327,8 +339,8 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         panic("kfree");
     if(p && p->pid > 2){
     	// Test prints
-    	cprintf("%s%d\n", "process pid: " , p->pid);
-    	cprintf("%s%d\n", "virtual address: " , a);
+    	// cprintf("%s%d\n", "process pid: " , p->pid);
+    	// cprintf("%s%d\n", "virtual address: " , a);
     	int indx = -1;
     	for(int i = 0; i < MAX_PAGES; i++){
     		if(currentPages[i].va == a){
@@ -336,11 +348,11 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     			break;
     		}
     	}
-    	cprintf("%s%d\n", "index chosen: " , indx);
+    	// cprintf("%s%d\n", "index chosen: " , indx);
     	//Didn't go throgh copyuvm, or only refrence remained
     	if(indx == -1){
     		char *v = P2V(pa);
-			kfree(v);
+        kfree(v);
     	}
     	else if(currentPages[indx].refCounter == 1){
     		char *v = P2V(pa);
@@ -360,12 +372,12 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 		kfree(v);
     }
       
-    //#if SELECTION != NONE
+    if (SELECTION != NONE){
       // Clear the place in ram array
       if(p->pgdir == pgdir){
         removeFromRamArray(p, a);
       }
-    //#endif
+    }
       *pte = 0;
     }else if((*pte & PTE_PG) != 0){ // In case page is in swapFile
       // Clear the place in swap array
@@ -421,7 +433,7 @@ clearpteu(pde_t *pgdir, char *uva)
 pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
-	cprintf("break: copyuvm\n");
+	// cprintf("break: copyuvm\n");
   pde_t *d;
   pte_t *pte;
   uint pa, i, flags;
@@ -534,14 +546,17 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 // page replacement prefrences should be implwmented here
 static int
 swapToFile(struct proc *p){
-  
+  // cprintf("swapToFile: break 1\n");
   // If init or shell
   if(p->pid < 2)
     return -1;
 
+  // cprintf("swapToFile: break 2\n");
+
   // Find free space in swap file
   int indx = -1;
   for(int i = 0; i < 16; i++){
+    // cprintf("%s%d%s%d\n", "swapPages ", i, ": ", p->swapPages[i]);
     if(p->swapPages[i] == -1){
       indx = i;
       break;
@@ -549,11 +564,12 @@ swapToFile(struct proc *p){
   }
   if(indx == -1)
     return -1;
-  
+  // cprintf("swapToFile: break 3\n");
   // Choose from physical memory file to swap
   int ramIndx = choosePageToSwap(p);
+  // cprintf("\n%s%d\n", "ram page index chosen: ", ramIndx);
   if(ramIndx == -1)
-  	panic("swapToFile: coudlnt find page to swap");
+  	panic("swapToFile: couldnt find page to swap");
   uint va = p->ramPages[ramIndx].va;
 
   // get PTE of chosen page
@@ -601,7 +617,7 @@ swapToFile(struct proc *p){
 	}
   else // Free memory
   	kfree((char*) P2V(PTE_ADDR(*pte)));
-
+  // cprintf("swapToFile: break 4\n");
   return 0;
 }
 
@@ -629,12 +645,13 @@ checkIfSwapFault(uint va){
   pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
   pte_t * pte = &pgtab[PTX(va)];
 
-  return !(*pte & PTE_P) && (*pte & PTE_PG);
+  return ((!(*pte & PTE_P)) && (*pte & PTE_PG));
 }
 
 // Take page from swap file and move it into physical memory
 void
 swapToRam(uint va){
+  // cprintf("break: swapToRam\n");
   struct proc *p = myproc();
 
   // @TODO: possible to add check for COW (shouldnt be)
@@ -643,7 +660,7 @@ swapToRam(uint va){
   if(p->pid < 2)
     panic("swapToRam: process pid <= 2");
   
-  // Find page if swapFile
+  // Find page in swapFile
   int indx = -1;
   for(int i = 0; i < 16; i++){
     if(p->swapPages[i] == va){
@@ -667,6 +684,7 @@ swapToRam(uint va){
   p->swapPages[indx] = -1;
   p->swapCounter--;
 
+  // cprintf("%s%d\n", "swapToRam: ramCounter: ", p->ramCounter);
   // If RAM is full - swap 1 page to file
   if(p->ramCounter >= 16)
     if(swapToFile(p) < 0)
@@ -695,17 +713,23 @@ swapToRam(uint va){
   lcr3(V2P(p->pgdir));  // Flush TLB
 
   // Update process paging info
-  #if SELECTION == NFUA || SELECTION == LAPA
+  if (SELECTION == NFUA){
   p->ramPages[indx].va = va;
   p->ramPages[indx].counter = 0;
-  #endif
-  #if SELECTION == SCFIFO || SELECTION == AQ
+  }
+  if (SELECTION == LAPA){
+    // cprintf("swapToRam: got to LAPA update\n");
+    p->ramPages[indx].va = va;
+    p->ramPages[indx].counter = 0xFFFFFFFF;
+    // cprintf("%s%d\n", "counter: ", p->ramPages[indx].counter);
+  }
+  if (SELECTION == SCFIFO || SELECTION == AQ){
   	for(int i = indx; i >= 0; i--){
       swapRamPages(p, i-1, i);
-	}
+  }
    	p->ramPages[0].va = va;
     p->ramPages[0].counter = 0;
-  #endif
+  }
   p->ramCounter++;
   
 }
@@ -772,7 +796,7 @@ checkIfCowFault(uint va){
   pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
   pte_t * pte = &pgtab[PTX(va)];
 
-  return !(*pte & PTE_W) && (*pte & PTE_RO);
+  return ((!(*pte & PTE_W)) && (*pte & PTE_RO));
 }
 
 // Refered from trap when getting COW page fault
@@ -843,12 +867,12 @@ removeFromRamArray(struct proc *p, uint va){
 			p->ramPages[i].va = -1;
 			p->ramPages[i].counter = 0;
 			// Currect queue
-			#if SELECTION == NFUA || SELECTION == AQ
+			if (SELECTION == NFUA || SELECTION == AQ){
 				for(int j = i; j < 15; j++){
 					swapRamPages(p, j, j+1);
 				}
 				break;
-			#endif
+			}
 		}
 	}
 }
@@ -857,28 +881,31 @@ removeFromRamArray(struct proc *p, uint va){
 // file, choose according to the selection's algorithm that was chosen
 static int
 choosePageToSwap(struct proc *p){
-  #if SELECTION == NFUA
-  return NFUAlgorithm(p);
-  #endif
-  #if SELECTION == LAPA
+  if (SELECTION == NFUA){
+    return NFUAlgorithm(p);
+  }
+  
+  if (SELECTION == LAPA){
   return LAPAlgorithm(p);
-  #endif
-  #if SELECTION == SCFIFO
+}
+  if (SELECTION == SCFIFO){
   // Try twice in case all the pages have access flag on
   int ret;
   ret = SCFIFOAlgorithm(p);
   if(ret == -1)
   	return SCFIFOAlgorithm(p);
   return ret;
-  #endif
-  #if SELECTION == AQ
+  }
+  if (SELECTION == AQ){
   return AQAlgorithm(p);
-  #endif
+  }
+  panic("choosePageToSwap: reached end of function!");
 }
 
 // Implementation of NFU + AGING algorithm 
 static int
 NFUAlgorithm(struct proc *p){
+  // cprintf("break: NFUA selection \n");
 	int ret = -1;
 	uint min = MAXINT;
 	for(int i = 0; i < 16; i++){
@@ -892,6 +919,7 @@ NFUAlgorithm(struct proc *p){
 
 static int
 LAPAlgorithm(struct proc *p){
+  // cprintf("LAPA algorithm\n");
 	int ret = -1;
 	int minOnes = MAXINT;
 	uint minCounter = MAXINT;
@@ -899,6 +927,9 @@ LAPAlgorithm(struct proc *p){
 	for(int i = 0; i < 16; i++){
 		if(p->ramPages[i].va != -1){
 			countBits = countSetBits(p->ramPages[i].counter);
+      // cprintf("%s%d%s%d\n", "LAPA: ramPages ", i, " va: ", p->ramPages[i].va);
+      // cprintf("%s%d%s%d\n", "LAPA: ramPages ", i, " counter: ", p->ramPages[i].counter);
+      // cprintf("%s%d%s%d\n", "LAPA: ramPages ", i, " countBits: ", countBits);
 			if(countBits < minOnes || (countBits == minOnes && p->ramPages[i].counter < minCounter)){
 				minOnes = countBits;
 				minCounter = p->ramPages[i].counter;
@@ -906,6 +937,7 @@ LAPAlgorithm(struct proc *p){
 			}
 		}
 	}
+  // cprintf("%s%d\n", "LAPA algorithm ret: ", ret);
 	return ret;
 }
 
@@ -983,16 +1015,17 @@ allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz)
 // Paging scheme selected
 void
 UpdatePagingInfo(uint va){
-	
-	#if SELECTION == NONE || SELECTION == SCFIFO
+	// cprintf("break: UpdatePagingInfo\n");
+
+	if (SELECTION == NONE || SELECTION == SCFIFO){
 		return;
-	#endif
+  }
 
 	struct proc *p = myproc();
 	pte_t *pte;
 	pte_t *nextPte;
 
-	#if SELECTION == NFUA || SELECTION == LAPA
+	if (SELECTION == NFUA || SELECTION == LAPA){
 	for(int i = 0; i < 16; i++){
 			if(p->ramPages[i].va == -1)
 				continue;
@@ -1001,14 +1034,14 @@ UpdatePagingInfo(uint va){
 				panic("UpdatePagingInfo: coudlnt fing PTE");
 			p->ramPages[i].counter >>= 1; // shift right
 			if(*pte & PTE_A){
-				p->ramPages[i].counter &= 0x80000000; // turn on MSB
-				*pte &= PTE_A;
+				p->ramPages[i].counter |= 0x80000000; // turn on MSB
+				*pte &= ~PTE_A;
 				lcr3(V2P(p->pgdir));
 			}
 	}
-	#endif
+	}
 
-	#if SELECTION == AQ
+	if (SELECTION == AQ){
 		for(int i = 15; i >= 0; i--){
 			if(p->ramPages[i].va == -1)
 				continue;
@@ -1030,6 +1063,6 @@ UpdatePagingInfo(uint va){
 			}
 		}
 		lcr3(V2P(p->pgdir));
-	#endif
+	}
 
 }

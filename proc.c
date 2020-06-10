@@ -207,7 +207,7 @@ fork(void)
     return -1;
   }
 
-  cprintf("Hey, i'm in fork! \n");
+  // cprintf("Hey, i'm in fork! \n");
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
@@ -216,7 +216,7 @@ fork(void)
     np->state = UNUSED;
     return -1;
   }
-  cprintf("break 1 \n");
+  // cprintf("break 1 \n");
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
@@ -232,7 +232,7 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
-  cprintf("break 2 \n");
+  // cprintf("break 2 \n");
   // Copy swapFile if exist
   if(curproc->swapFile != 0){
 
@@ -243,7 +243,7 @@ fork(void)
         panic("fork: couldnt write to swap file");
       i++;
     }
-    cprintf("break 3 \n");
+    // cprintf("break 3 \n");
     // Copy parent's state
     for(int j = 0; j < 16; j++){
       np->ramPages[j].va = curproc->ramPages[j].va;
@@ -253,7 +253,7 @@ fork(void)
     np->swapCounter = curproc->swapCounter;
     np->ramCounter = curproc->ramCounter;
   }
-  cprintf("break 4 \n");
+  // cprintf("break 4 \n");
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
@@ -382,6 +382,8 @@ scheduler(void)
 
   // Turn on flag
   isSchedActive = 1;
+  // @TODO: remove, replace with selection in makefile
+  SELECTION = LAPA;
   
   for(;;){
     // Enable interrupts on this processor.

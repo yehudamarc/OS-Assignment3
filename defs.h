@@ -224,3 +224,11 @@ struct page {
 struct page currentPages[MAX_PAGES];
 
 // @TODO: synchronize currentPages array
+
+
+#define NONE 0
+#define NFUA 1
+#define LAPA 2
+#define SCFIFO 3
+#define AQ 4
+int SELECTION;

@@ -98,6 +98,12 @@ struct segdesc {
 #define PTE_PS          0x080   // Page Size
 #define PTE_PG          0x200   // Paged out to secondary storage 
 #define PTE_RO 			0x400   // Read only from COW
+// #define NONE 0
+// #define NFUA 1
+// #define LAPA 2
+// #define SCFIFO 3
+// #define AQ 4
+
 
 // Address in page table or page directory entry
 #define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)

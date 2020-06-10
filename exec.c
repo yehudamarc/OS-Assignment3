@@ -48,7 +48,7 @@ exec(char *path, char **argv)
   curproc->swapCounter = 0;
   curproc->ramCounter = 0;
   for(int i = 0; i < 16; i++){
-    curproc->swapPages[i] = 0;
+    curproc->swapPages[i] = -1;
     curproc->ramPages[i].va = -1;
     curproc->ramPages[i].counter = 0;
   }

@@ -78,29 +78,41 @@ trap(struct trapframe *tf)
     lapiceoi();
     break;
   case T_PGFLT:
-  	cprintf("break 5\n");
+  	// @TODO: remove. test prints
+  	// cprintf("break: Page fault\n");
+  	// cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
+  	// struct proc *p= myproc();
+  	// pde_t *pgdir = p->pgdir;
+  	// pde_t *pde = &pgdir[PDX(PGROUNDDOWN(rcr2()))];
+  	// pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+  	// pte_t *pte = &pgtab[PTX(PGROUNDDOWN(rcr2()))];
+  	// cprintf("%s%d\n", "page flags: ", PTE_FLAGS(*pte));
+  	// for (int i = 0; i < 16; ++i)
+  	// {
+  	// 	cprintf("%s%d%s%d\n", "ramPages", i, " : ", p->ramPages[i].va);
+  	// 	cprintf("%s%d%s%d\n", "swapPages", i, " : ", p->swapPages);
+  	// }
   	UpdatePagingInfo(PGROUNDDOWN(rcr2()));
     if(checkIfSwapFault(PGROUNDDOWN(rcr2()))){
-    	cprintf("break 6\n");
-    	cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
+    	// cprintf("break: Swap fault\n");
       swapToRam(PGROUNDDOWN(rcr2()));
       break;
     }
     if(checkIfCowFault(PGROUNDDOWN(rcr2()))){
-    	cprintf("break 7\n");
+    	// cprintf("break: COW fault\n");
     	copyOnWrite(PGROUNDDOWN(rcr2()));
     	break;
     }
-    pde_t* pgdir = myproc()->pgdir;
-  	pde_t *pde = &pgdir[PDX(PGROUNDDOWN(rcr2()))];
-  	pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
-  	pte_t * pte = &pgtab[PTX(PGROUNDDOWN(rcr2()))];
-    if(!(*pte & PTE_U) && !(*pte & PTE_W) && !(*pte & PTE_P)){
-    	cprintf("break 8\n");
-    	cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
-    	*pte |= PTE_U | PTE_W | PTE_P;
-    	break;
-    }
+   //  pde_t* pgdir = myproc()->pgdir;
+  	// pde_t *pde = &pgdir[PDX(PGROUNDDOWN(rcr2()))];
+  	// pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+  	// pte_t * pte = &pgtab[PTX(PGROUNDDOWN(rcr2()))];
+    // if(!(*pte & PTE_U) && !(*pte & PTE_W) && !(*pte & PTE_P)){
+    // 	cprintf("break 8\n");
+    // 	cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
+    // 	*pte |= PTE_U | PTE_W | PTE_P;
+    // 	break;
+   	// }
 
   //PAGEBREAK: 13
   default:

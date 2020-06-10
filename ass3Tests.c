@@ -134,9 +134,9 @@ char *a[16];
 
 	printf(1, "COW test 2 ...\n");
 
-	char *arr2[60000];
+	char *arr2[30000];
 
-	for (int i = 0; i < 60000; ++i) {
+	for (int i = 0; i < 30000; ++i) {
 		arr2[i] = sbrk(PGSIZE);
 		if(i < 10)
 			printf(1, "arr[%d]=0x%x\n", i, arr2[i]);
@@ -144,7 +144,40 @@ char *a[16];
 
 	printf(1, "COW test 2 passed\n");
 	sleep(100);
+	
 
+
+	// ------------- Another Test -----------------
+
+/*
+	char *arr[30];
+	char input[10];
+	// Allocate all remaining 13 physical pages
+	get_pages_info();
+	for (int i = 0; i < 13; ++i) {
+		arr[i] = sbrk(PGSIZE);
+		printf(1, "arr[%d]=0x%x\n", i, arr[i]);
+	}
+	printf(1, "Called sbrk(PGSIZE) 13 times - all physical pages taken.\nPress any key...\n");
+//	getpid();
+	get_pages_info();	
+	gets(input, 10);
+	//test cow after fork
+	arr[14] = sbrk(PGSIZE);
+	if (fork()==0){
+		get_pages_info();
+		printf(1, "Called sbrk(PGSIZE) for the X time, a page fault should occur and one page in swap file.\n");
+		printf(1, "before: %s\n", arr[1][2]);
+		arr[1][2] = 'k';
+		printf(1, "after: %s\n", arr[1][2]);
+	
+		get_pages_info();
+		getpid();
+		exit();
+	}
+	wait();
+	get_pages_info();
+*/
 	exit();
 
 }
