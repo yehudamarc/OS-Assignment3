@@ -61,7 +61,8 @@ struct proc {
   struct ramPage ramPages[16];// contain va's for pages in ram
   uint ramCounter;            // Number of pages in RAM
   uint swapCounter;           // Number of pages in swapFile
-  struct pageLink *pageQueue; // Pointer to head of the RAM pages queue
+  uint pageFaults; 			  // Total number of page faults occured
+  uint totalPagedOut; 		  // Total number of paged out pages
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -72,10 +73,3 @@ struct proc {
 
 // flag for initialization of the system
 int isSchedActive;
-
-// Struct for managing page replacement scheme
-struct pageLink {
-	uint va;
-	uint counter;
-	struct pageLink *next;
-};

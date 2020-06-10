@@ -120,6 +120,8 @@ found:
   }
   p->ramCounter = 0;
   p->swapCounter = 0;
+  p->pageFaults = 0;
+  p->totalPagedOut = 0;
 
   // struct pageLink *currLink = p->pageQueue;
   // struct pageLink *oldLink;
@@ -252,6 +254,7 @@ fork(void)
     }
     np->swapCounter = curproc->swapCounter;
     np->ramCounter = curproc->ramCounter;
+
   }
   // cprintf("break 4 \n");
   acquire(&ptable.lock);
@@ -347,6 +350,8 @@ wait(void)
         }
         p->swapCounter = 0;
         p->ramCounter = 0;
+        p->pageFaults = 0;
+        p->totalPagedOut = 0;
         
         p->state = UNUSED;
         release(&ptable.lock);
@@ -582,7 +587,10 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
+    cprintf("%d %s %s ", p->pid, state, p->name);
+
+    cprintf("%d %d %d %d", p->ramCounter, p->swapCounter, p->pageFaults, p->totalPagedOut);
+
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)
@@ -590,4 +598,5 @@ procdump(void)
     }
     cprintf("\n");
   }
+  cprintf("%d / %d free page frames in the system\n", getNumberOfFreePages(), getNumberOfTotalPages());
 }

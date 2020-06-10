@@ -193,3 +193,8 @@ getNumberOfFreePages(void){
   return freePages;
 }
 
+int
+getNumberOfTotalPages(void){
+  return totalPages;
+}
+

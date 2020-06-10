@@ -587,6 +587,7 @@ swapToFile(struct proc *p){
   p->ramCounter--;
   p->swapPages[indx] = va;
   p->swapCounter++;
+  p->totalPagedOut++;
   
   // Update PTE info
   *pte &= ~PTE_P;       // Turn off

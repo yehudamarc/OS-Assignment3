@@ -92,6 +92,7 @@ trap(struct trapframe *tf)
   	// 	cprintf("%s%d%s%d\n", "ramPages", i, " : ", p->ramPages[i].va);
   	// 	cprintf("%s%d%s%d\n", "swapPages", i, " : ", p->swapPages);
   	// }
+  	myproc()->pageFaults++;
   	UpdatePagingInfo(PGROUNDDOWN(rcr2()));
     if(checkIfSwapFault(PGROUNDDOWN(rcr2()))){
     	// cprintf("break: Swap fault\n");
