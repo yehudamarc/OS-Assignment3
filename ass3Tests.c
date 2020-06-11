@@ -79,6 +79,11 @@ char *a[16];
 
 	// -------------- COW Test -------------------
 	
+	// Allocate 10 pages, fork and then write to 1 page
+	// check prints - should be 1 less free page after the write
+	// Also run once with allocuvm and once with old_allocuvm
+	// and notice the changes in the number of free pages after fork
+
 	char *arr[30];
 	char input[10];
 	// Allocate all remaining 13 physical pages
@@ -107,20 +112,25 @@ char *a[16];
 	wait();
 	get_pages_info();
 	
-	printf(1, "COW test 1 passed");
+	printf(1, "COW test 1 finished - check results\n");
 	sleep(100);
 
 	
 
 	// -------------- Fork Test ----------
 
+	// Performe several forks
+	// Just check there is no errors
+
 	printf(1, "Fork test ...\n");
 
 	if(fork() == 0){
-		printf(1, "it's child\n");
-		exit();
-		if(fork() == 0)
+		if(fork() == 0){
+			if(fork() == 0)
+				exit();
+			wait();
 			exit();
+		}
 		wait();
 		exit();
 	}
@@ -132,15 +142,27 @@ char *a[16];
 
 	// ------------ COW test 2 ------------------
 
+	// Allocate more than half of total memory
+	// then performe fork, should collapse without COW
+
 	printf(1, "COW test 2 ...\n");
 
-	char *arr2[30000];
+	if(fork() == 0){
+		char *arr2[30000];
 
-	for (int i = 0; i < 30000; ++i) {
-		arr2[i] = sbrk(PGSIZE);
-		if(i < 10)
-			printf(1, "arr[%d]=0x%x\n", i, arr2[i]);
+		for (int i = 0; i < 30000; ++i) {
+			arr2[i] = sbrk(PGSIZE);
+			if(i < 10)
+				printf(1, "arr[%d]=0x%x\n", i, arr2[i]);
+		}
+		if(fork() == 0)
+			exit();
+		
+		wait();
+		exit();
 	}
+
+	wait();
 
 	printf(1, "COW test 2 passed\n");
 	sleep(100);

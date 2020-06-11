@@ -9,7 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-struct pageLink;
+
 
 // bio.c
 void            binit(void);
@@ -202,7 +202,6 @@ int 			checkIfSwapFault(uint);
 void 			swapToRam(uint);
 int 			checkIfCowFault(uint);
 void 			copyOnWrite(uint);
-int 			allocuvm_none(pde_t *, uint, uint);
 void 			UpdatePagingInfo(uint);
 
 // number of elements in fixed-size array
@@ -219,6 +218,7 @@ void 			UpdatePagingInfo(uint);
 // Struct for standart page
 struct page {
   uint va;
+  uint pa;
   int refCounter;
 };
 // Array containg info of all the pages we using

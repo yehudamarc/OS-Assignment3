@@ -13,9 +13,9 @@ pde_t *kpgdir;  // for use in scheduler()
 static int swapToFile(struct proc *p);
 static int findFreePage(struct proc *p);
 static int choosePageToSwap(struct proc *p);
-static void addToCurrentPages(uint va);
+static void addToCurrentPages(uint va, uint pa);
 static int findFreeEntry(void);
-static int findInCurrentPages(uint va);
+static int findInCurrentPages(uint va, uint pa);
 static void swapRamPages(struct proc *p, int i, int j);
 static void removeFromRamArray(struct proc *p, uint va);
 static int NFUAlgorithm(struct proc *p);
@@ -23,6 +23,9 @@ static int LAPAlgorithm(struct proc *p);
 static int SCFIFOAlgorithm(struct proc *p);
 static int AQAlgorithm(struct proc *p);
 static int countSetBits(uint n);
+static int allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz);
+static void clearCurrentPagesEntry(int index);
+// static pde_t* old_copyuvm(pde_t *pgdir, uint sz);
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -247,6 +250,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
   }
 	if (SELECTION==NONE){
   // cprintf("selection==none\n");
+  // Go to original allocuvm function, without paging framework
 	return allocuvm_none(pgdir, oldsz, newsz);
 	}
   char *mem;
@@ -263,10 +267,12 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
   for(; a < newsz; a += PGSIZE){
     // Check if can generate more pages
     if(p->pid > 2 && p->ramCounter == 16){
+      // if RAM is full, swap 1 page to file
       if(p->swapCounter < 16){
         if(swapToFile(p) < 0)
           panic("allocuvm: swapToFile failed!");
       }
+      // Already have 32 pages, can't allocate more memory
       else
         return 0;
       // @TODO: return 0?
@@ -286,7 +292,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       return 0;
     }
     if(p->pid > 2){
-      // Update process paging info
+      // Update process paging info, according to active algorithm
       int indx = findFreePage(p);
       if(indx == -1)
         panic("alocuvm: no free space in ramPages!");
@@ -341,24 +347,19 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     	// Test prints
     	// cprintf("%s%d\n", "process pid: " , p->pid);
     	// cprintf("%s%d\n", "virtual address: " , a);
-    	int indx = -1;
-    	for(int i = 0; i < MAX_PAGES; i++){
-    		if(currentPages[i].va == a){
-    			indx = i;
-    			break;
-    		}
-    	}
+    	int indx = findInCurrentPages(a, pa);
+
     	// cprintf("%s%d\n", "index chosen: " , indx);
-    	//Didn't go throgh copyuvm, or only refrence remained
+    	//Didn't go throgh copyuvm
     	if(indx == -1){
     		char *v = P2V(pa);
         kfree(v);
     	}
     	else if(currentPages[indx].refCounter == 1){
-    		char *v = P2V(pa);
-			kfree(v);
-			currentPages[indx].va = -1;
-			currentPages[indx].refCounter = 0;
+        // If only refrence remained
+      	char *v = P2V(pa);
+  			kfree(v);
+  			clearCurrentPagesEntry(indx);
     	}
     	else if(currentPages[indx].refCounter > 1){
     		currentPages[indx].refCounter--;
@@ -433,6 +434,12 @@ clearpteu(pde_t *pgdir, char *uva)
 pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
+  /*
+  // When running COW test, run with call to old_copyuvm
+  // and without and notice changes in number of free pages
+  return old_copyuvm(pgdir, sz);
+  */
+  
 	// cprintf("break: copyuvm\n");
   pde_t *d;
   pte_t *pte;
@@ -446,7 +453,7 @@ copyuvm(pde_t *pgdir, uint sz)
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P)){
-      if(*pte & PTE_PG){
+      if(*pte & PTE_PG){ // If in swapFile 
         pte = walkpgdir(d, (void*)i, 1); // Create PTE for the page
         // Turn on relevant flags. no physical address
         *pte = PTE_U | PTE_W | PTE_PG;
@@ -462,7 +469,7 @@ copyuvm(pde_t *pgdir, uint sz)
 	    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
 	    	goto bad;
 	    // Update currentPages
-	    addToCurrentPages(i);
+	    addToCurrentPages(i,pa);
 	    
 	    // Update PTEs
 	    *pte |= PTE_RO;
@@ -475,16 +482,16 @@ copyuvm(pde_t *pgdir, uint sz)
 	    *newPte &= ~PTE_W;
 	    lcr3(V2P(d));  // Flush TLB
 	    
-	}
-	else{ // it's init or shell - ignore COW
-		if((mem = kalloc()) == 0)
-      		goto bad;
-    	memmove(mem, (char*)P2V(pa), PGSIZE);
-    	if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
-      		kfree(mem);
-      		goto bad;
-    	}
-	}
+  	}
+  	else{ // it's init or shell - ignore COW
+  		if((mem = kalloc()) == 0)
+        		goto bad;
+      	memmove(mem, (char*)P2V(pa), PGSIZE);
+      	if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
+        		kfree(mem);
+        		goto bad;
+      	}
+  	}
   }
   return d;
 
@@ -543,7 +550,6 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 
 // Swap 1 page from RAM to file for given process
 // Assume we have free space in swapFile
-// page replacement prefrences should be implwmented here
 static int
 swapToFile(struct proc *p){
   // cprintf("swapToFile: break 1\n");
@@ -565,16 +571,17 @@ swapToFile(struct proc *p){
   if(indx == -1)
     return -1;
   // cprintf("swapToFile: break 3\n");
-  // Choose from physical memory file to swap
+  // Choose from physical memory page to swap
   int ramIndx = choosePageToSwap(p);
   // cprintf("\n%s%d\n", "ram page index chosen: ", ramIndx);
   if(ramIndx == -1)
   	panic("swapToFile: couldnt find page to swap");
   uint va = p->ramPages[ramIndx].va;
 
-  // get PTE of chosen page
+  // get PTE and pa of chosen page
   pte_t* pte = walkpgdir(p->pgdir, (void*)va, 0);
-  
+  uint pa = PTE_ADDR(*pte);
+
   // Write to file - split because it seems to not work with PGSIZE
   if(writeToSwapFile(p, (char*) P2V(PTE_ADDR(*pte)), indx*PGSIZE, PGSIZE/2) < 0)
     panic("swapToFile: couldnt write to file!");
@@ -596,12 +603,12 @@ swapToFile(struct proc *p){
 
   // if read-only as reult of COW
   if(*pte & PTE_RO){
-	  *pte &= ~PTE_RO;       // Turn off
-	  *pte |= PTE_W; 		 // Turn on
+	  *pte &= ~PTE_RO;      // Turn off
+	  *pte |= PTE_W; 		    // Turn on
 	  lcr3(V2P(p->pgdir));  // Flush TLB
 
-	  // Check if is in current pages table
-	  int indx = findInCurrentPages(va);
+	  // Find in current pages table
+	  int indx = findInCurrentPages(va, pa);
 
 	  if(indx < 0){
 	  	// Not in current pages table
@@ -609,8 +616,7 @@ swapToFile(struct proc *p){
 	  	// kfree((char*) P2V(PTE_ADDR(*pte)));
 	  }else if(currentPages[indx].refCounter == 1){
 	  	// It's the only reference
-	  	currentPages[indx].va = -1;
-	  	currentPages[indx].refCounter = 0;
+	  	clearCurrentPagesEntry(indx);
 	  	kfree((char*) P2V(PTE_ADDR(*pte)));
 	  }else {
 	  	currentPages[indx].refCounter--;
@@ -638,7 +644,7 @@ findFreePage(struct proc *p){
   return indx;
 }
 
-// Check if the file is in swapFile
+// Check if the file is in swapFile (according to it's flags)
 int
 checkIfSwapFault(uint va){
   pde_t* pgdir = myproc()->pgdir;
@@ -649,7 +655,7 @@ checkIfSwapFault(uint va){
   return ((!(*pte & PTE_P)) && (*pte & PTE_PG));
 }
 
-// Take page from swap file and move it into physical memory
+// Take given page from swap file and move it into physical memory
 void
 swapToRam(uint va){
   // cprintf("break: swapToRam\n");
@@ -700,7 +706,7 @@ swapToRam(uint va){
   // Allocate memory in RAM
   char *mem = kalloc();
   if(mem == 0)
-    panic("swapToRam: couldnt find free space in RAM");
+    panic("swapToRam: couldnt allocate memory");
   memset(mem, 0, PGSIZE);
 
   // Write from buffer to memory
@@ -715,8 +721,8 @@ swapToRam(uint va){
 
   // Update process paging info
   if (SELECTION == NFUA){
-  p->ramPages[indx].va = va;
-  p->ramPages[indx].counter = 0;
+    p->ramPages[indx].va = va;
+    p->ramPages[indx].counter = 0;
   }
   if (SELECTION == LAPA){
     // cprintf("swapToRam: got to LAPA update\n");
@@ -725,12 +731,14 @@ swapToRam(uint va){
     // cprintf("%s%d\n", "counter: ", p->ramPages[indx].counter);
   }
   if (SELECTION == SCFIFO || SELECTION == AQ){
+    // Update queue
   	for(int i = indx; i >= 0; i--){
       swapRamPages(p, i-1, i);
-  }
+    }
    	p->ramPages[0].va = va;
     p->ramPages[0].counter = 0;
   }
+
   p->ramCounter++;
   
 }
@@ -738,14 +746,9 @@ swapToRam(uint va){
 // Get virtual address, if exist in currentPages - increase refrence counter
 // else - insert it into currentPages with ref counter of 2
 static void
-addToCurrentPages(uint va){
-	int indx = -1;
-	for(int i = 0; i < MAX_PAGES; i++){
-		if(currentPages[i].va == va){
-			indx = i;
-			break;
-		}
-	}
+addToCurrentPages(uint va, uint pa){
+	int indx = findInCurrentPages(va, pa);
+
 	// If couldn't find
 	if(indx == -1){
 		int freeEntry = findFreeEntry();
@@ -753,6 +756,7 @@ addToCurrentPages(uint va){
 			panic("addToCurrentPages: no free entry in currentPages");
 		// else
 		currentPages[freeEntry].va = va;
+    currentPages[freeEntry].pa = pa;
 		currentPages[freeEntry].refCounter = 2; // parent and child
 	}
 	else{
@@ -777,11 +781,11 @@ findFreeEntry(void){
 // Given virtual address, find the corresponding 
 // entry in currentPages table
 static int
-findInCurrentPages(uint va){
+findInCurrentPages(uint va, uint pa){
 	int ret = -1;
 	for (int i = 0; i < MAX_PAGES; ++i)
 	{
-		if(currentPages[i].va == va){
+		if(currentPages[i].va == va && currentPages[i].pa == pa){
 			ret = i;
 			break;
 		}
@@ -789,7 +793,7 @@ findInCurrentPages(uint va){
 	return ret;
 }
 
-// Check if file is read-only from COW
+// Check if file is read-only from COW (according to it's flags)
 int
 checkIfCowFault(uint va){
   pde_t* pgdir = myproc()->pgdir;
@@ -800,13 +804,14 @@ checkIfCowFault(uint va){
   return ((!(*pte & PTE_W)) && (*pte & PTE_RO));
 }
 
-// Refered from trap when getting COW page fault
+// Called from trap when getting COW page fault
 // make writeable copy of the page
 void
 copyOnWrite(uint va){
 	struct proc *p = myproc();
 	pte_t *pte;
 	char *mem;
+  uint pa;
 
 	if((pte = walkpgdir(p->pgdir, (void *) va, 0)) == 0)
       panic("copyOnWrite: pte should exist");
@@ -817,14 +822,14 @@ copyOnWrite(uint va){
   if((*pte & PTE_W) || !(*pte & PTE_RO))
   	panic("copyOnWrite: not COW fault");
 
-  int indx = findInCurrentPages(va);
+  pa = PTE_ADDR(*pte);
+  int indx = findInCurrentPages(va, pa);
   if(indx < 0)
   	panic("copyOnWrite: couldnt find page in currentPages");
   if(currentPages[indx].refCounter < 1)
   	panic("copyOnWrite: refCounter under 1");
   else if(currentPages[indx].refCounter == 1){
-  	currentPages[indx].va = -1;
-  	currentPages[indx].refCounter = 0;
+  	clearCurrentPagesEntry(indx);
   	*pte |= PTE_W;
   	*pte &= ~PTE_RO;
   	lcr3(V2P(p->pgdir));  // Flush TLB
@@ -839,7 +844,7 @@ copyOnWrite(uint va){
   	uint flags = PTE_FLAGS(*pte);
   	memmove(mem, (char*)P2V(pa), PGSIZE);
 
-  	*pte  = V2P(mem) | flags;
+  	*pte = V2P(mem) | flags;
   	*pte |= PTE_W;
   	*pte &= ~PTE_RO;
   	lcr3(V2P(p->pgdir));  // Flush TLB
@@ -849,7 +854,7 @@ copyOnWrite(uint va){
 
 }
 
-// Get index of 2 pages in ram array and swap them
+// Get index of 2 pages in ram array and swap their places
 static void
 swapRamPages(struct proc *p, int i, int j){
 	struct ramPage temp = {0, 0};
@@ -861,6 +866,7 @@ swapRamPages(struct proc *p, int i, int j){
 	p->ramPages[j].counter = temp.counter;
 }
 
+// Given virtual address remove it from ramPages array of the proccess
 static void
 removeFromRamArray(struct proc *p, uint va){
 	for(int i = 0; i < 16; i++){
@@ -904,6 +910,7 @@ choosePageToSwap(struct proc *p){
 }
 
 // Implementation of NFU + AGING algorithm 
+// Select the page with the lowest counter
 static int
 NFUAlgorithm(struct proc *p){
   // cprintf("break: NFUA selection \n");
@@ -918,6 +925,9 @@ NFUAlgorithm(struct proc *p){
 	return ret;
 }
 
+// Implementation of Least Accessed Page + AGING algorithm 
+// Select the page with the smallest number on "1"
+// In case of a tie - select the one with the smallest counter
 static int
 LAPAlgorithm(struct proc *p){
   // cprintf("LAPA algorithm\n");
@@ -942,7 +952,7 @@ LAPAlgorithm(struct proc *p){
 	return ret;
 }
 
-// Count the number of 1 in given number
+// Count the number of "1" bits in given number
 static int
 countSetBits(uint n) 
 { 
@@ -982,7 +992,7 @@ AQAlgorithm(struct proc *p){
 }
 
 // original allocuvm - without paging framework
-int
+static int
 allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz)
 {
   char *mem;
@@ -1067,3 +1077,45 @@ UpdatePagingInfo(uint va){
 	}
 
 }
+
+// Given an index, clear the correspond currentPages entry
+static void
+clearCurrentPagesEntry(int indx){
+  currentPages[indx].va = -1;
+  currentPages[indx].pa = -1;
+  currentPages[indx].refCounter = 0;
+}
+
+/*
+static pde_t*
+old_copyuvm(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+  char *mem;
+
+  if((d = setupkvm()) == 0)
+    return 0;
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("copyuvm: pte should exist");
+    if(!(*pte & PTE_P))
+      panic("copyuvm: page not present");
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      goto bad;
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
+      kfree(mem);
+      goto bad;
+    }
+  }
+  return d;
+
+bad:
+  freevm(d);
+  return 0;
+}
+*/

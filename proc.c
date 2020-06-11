@@ -388,7 +388,7 @@ scheduler(void)
   // Turn on flag
   isSchedActive = 1;
   // @TODO: remove, replace with selection in makefile
-  SELECTION = LAPA;
+  SELECTION = AQ;
   
   for(;;){
     // Enable interrupts on this processor.
