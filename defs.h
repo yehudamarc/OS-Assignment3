@@ -217,7 +217,6 @@ void 			UpdatePagingInfo(uint);
 
 // Struct for standart page
 struct page {
-  uint va;
   uint pa;
   int refCounter;
 };

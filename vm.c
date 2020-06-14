@@ -13,9 +13,9 @@ pde_t *kpgdir;  // for use in scheduler()
 static int swapToFile(struct proc *p);
 static int findFreePage(struct proc *p);
 static int choosePageToSwap(struct proc *p);
-static void addToCurrentPages(uint va, uint pa);
+static void addToCurrentPages(uint pa);
 static int findFreeEntry(void);
-static int findInCurrentPages(uint va, uint pa);
+static int findInCurrentPages(uint pa);
 static void swapRamPages(struct proc *p, int i, int j);
 static void removeFromRamArray(struct proc *p, uint va);
 static int NFUAlgorithm(struct proc *p);
@@ -347,7 +347,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     	// Test prints
     	// cprintf("%s%d\n", "process pid: " , p->pid);
     	// cprintf("%s%d\n", "virtual address: " , a);
-    	int indx = findInCurrentPages(a, pa);
+    	int indx = findInCurrentPages(pa);
 
     	// cprintf("%s%d\n", "index chosen: " , indx);
     	//Didn't go throgh copyuvm
@@ -469,7 +469,7 @@ copyuvm(pde_t *pgdir, uint sz)
 	    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
 	    	goto bad;
 	    // Update currentPages
-	    addToCurrentPages(i,pa);
+	    addToCurrentPages(pa);
 	    
 	    // Update PTEs
 	    *pte |= PTE_RO;
@@ -608,7 +608,7 @@ swapToFile(struct proc *p){
 	  lcr3(V2P(p->pgdir));  // Flush TLB
 
 	  // Find in current pages table
-	  int indx = findInCurrentPages(va, pa);
+	  int indx = findInCurrentPages(pa);
 
 	  if(indx < 0){
 	  	// Not in current pages table
@@ -746,8 +746,8 @@ swapToRam(uint va){
 // Get virtual address, if exist in currentPages - increase refrence counter
 // else - insert it into currentPages with ref counter of 2
 static void
-addToCurrentPages(uint va, uint pa){
-	int indx = findInCurrentPages(va, pa);
+addToCurrentPages(uint pa){
+	int indx = findInCurrentPages(pa);
 
 	// If couldn't find
 	if(indx == -1){
@@ -755,7 +755,6 @@ addToCurrentPages(uint va, uint pa){
 		if(freeEntry < 0)
 			panic("addToCurrentPages: no free entry in currentPages");
 		// else
-		currentPages[freeEntry].va = va;
     currentPages[freeEntry].pa = pa;
 		currentPages[freeEntry].refCounter = 2; // parent and child
 	}
@@ -770,7 +769,7 @@ static int
 findFreeEntry(void){
 	int indx = -1;
 	for(int i = 0; i < MAX_PAGES; i++){
-		if(currentPages[i].va == -1){
+		if(currentPages[i].pa == -1){
 			indx = i;
 			break;
 		}
@@ -781,11 +780,11 @@ findFreeEntry(void){
 // Given virtual address, find the corresponding 
 // entry in currentPages table
 static int
-findInCurrentPages(uint va, uint pa){
+findInCurrentPages(uint pa){
 	int ret = -1;
 	for (int i = 0; i < MAX_PAGES; ++i)
 	{
-		if(currentPages[i].va == va && currentPages[i].pa == pa){
+		if(currentPages[i].pa == pa){
 			ret = i;
 			break;
 		}
@@ -823,7 +822,7 @@ copyOnWrite(uint va){
   	panic("copyOnWrite: not COW fault");
 
   pa = PTE_ADDR(*pte);
-  int indx = findInCurrentPages(va, pa);
+  int indx = findInCurrentPages(pa);
   if(indx < 0)
   	panic("copyOnWrite: couldnt find page in currentPages");
   if(currentPages[indx].refCounter < 1)
@@ -1081,7 +1080,6 @@ UpdatePagingInfo(uint va){
 // Given an index, clear the correspond currentPages entry
 static void
 clearCurrentPagesEntry(int indx){
-  currentPages[indx].va = -1;
   currentPages[indx].pa = -1;
   currentPages[indx].refCounter = 0;
 }

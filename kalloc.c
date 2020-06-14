@@ -45,7 +45,6 @@ kinit1(void *vstart, void *vend)
   
   // initilize current pages array
   for(int i = 0; i < MAX_PAGES; i++){
-    currentPages[i].va = -1;
     currentPages[i].pa = -1;
     currentPages[i].refCounter = 0;
   }
