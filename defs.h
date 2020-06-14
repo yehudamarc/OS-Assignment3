@@ -231,4 +231,4 @@ struct page currentPages[MAX_PAGES];
 #define LAPA 2
 #define SCFIFO 3
 #define AQ 4
-int SELECTION;
+// int SELECTION;

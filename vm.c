@@ -239,20 +239,27 @@ int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
   // cprintf("break: allocuvm\n");
-  if (SELECTION==SCFIFO){
-  // cprintf("selection==scfifo\n");
-  }
-  if (SELECTION==NFUA){
-  // cprintf("selection==nfua\n");
-  }
-  if (SELECTION==LAPA){
-  // cprintf("selection==lapa\n");
-  }
-	if (SELECTION==NONE){
-  // cprintf("selection==none\n");
-  // Go to original allocuvm function, without paging framework
-	return allocuvm_none(pgdir, oldsz, newsz);
-	}
+  #if (SELECTION==SCFIFO)
+   cprintf("selection==scfifo\n");
+  #endif
+  
+  #if (SELECTION==NFUA)
+    cprintf("selection==nfua\n");
+  #endif
+  
+  #if (SELECTION==LAPA)
+    cprintf("selection==lapa\n");
+  #endif
+
+  #if (SELECTION!=LAPA)
+    cprintf("selection!=lapa\n");
+  #endif
+
+	#if (SELECTION==NONE)
+    cprintf("selection==none\n");
+    // Go to original allocuvm function, without paging framework
+  	return allocuvm_none(pgdir, oldsz, newsz);
+  #endif
   char *mem;
   uint a;
   // @TODO: what if it is another proccess?
@@ -296,23 +303,23 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       int indx = findFreePage(p);
       if(indx == -1)
         panic("alocuvm: no free space in ramPages!");
-      if (SELECTION == NFUA){
+      #if (SELECTION == NFUA)
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0;
-      }
-      if (SELECTION == LAPA){
+      #endif
+      #if (SELECTION == LAPA)
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0xFFFFFFFF;
         // cprintf("%s%d%s%d\n", "allocuvm: ramPages ", indx, " counter: ", p->ramPages[indx].counter);
-      }
-      if (SELECTION == SCFIFO || SELECTION == AQ){
+      #endif
+      #if (SELECTION == SCFIFO || SELECTION == AQ)
       	// Update queue
       	for(int i = indx; i >= 0; i--){
       		swapRamPages(p, i-1, i);
-      	}
+        }
       	p->ramPages[0].va = a;
       	p->ramPages[0].counter = 0;
-      }
+      #endif
       p->ramCounter++;
     }
   }
@@ -373,12 +380,11 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 		kfree(v);
     }
       
-    if (SELECTION != NONE){
+    #if (SELECTION != NONE)
       // Clear the place in ram array
-      if(p->pgdir == pgdir){
+      if(p->pgdir == pgdir)
         removeFromRamArray(p, a);
-      }
-    }
+    #endif
       *pte = 0;
     }else if((*pte & PTE_PG) != 0){ // In case page is in swapFile
       // Clear the place in swap array
@@ -720,24 +726,24 @@ swapToRam(uint va){
   lcr3(V2P(p->pgdir));  // Flush TLB
 
   // Update process paging info
-  if (SELECTION == NFUA){
+  #if (SELECTION == NFUA)
     p->ramPages[indx].va = va;
     p->ramPages[indx].counter = 0;
-  }
-  if (SELECTION == LAPA){
+  #endif
+  #if (SELECTION == LAPA)
     // cprintf("swapToRam: got to LAPA update\n");
     p->ramPages[indx].va = va;
     p->ramPages[indx].counter = 0xFFFFFFFF;
     // cprintf("%s%d\n", "counter: ", p->ramPages[indx].counter);
-  }
-  if (SELECTION == SCFIFO || SELECTION == AQ){
+  #endif
+  #if (SELECTION == SCFIFO || SELECTION == AQ)
     // Update queue
   	for(int i = indx; i >= 0; i--){
       swapRamPages(p, i-1, i);
     }
    	p->ramPages[0].va = va;
     p->ramPages[0].counter = 0;
-  }
+  #endif
 
   p->ramCounter++;
   
@@ -873,12 +879,12 @@ removeFromRamArray(struct proc *p, uint va){
 			p->ramPages[i].va = -1;
 			p->ramPages[i].counter = 0;
 			// Currect queue
-			if (SELECTION == NFUA || SELECTION == AQ){
+			#if (SELECTION == NFUA || SELECTION == AQ)
 				for(int j = i; j < 15; j++){
 					swapRamPages(p, j, j+1);
 				}
 				break;
-			}
+			#endif
 		}
 	}
 }
@@ -887,25 +893,28 @@ removeFromRamArray(struct proc *p, uint va){
 // file, choose according to the selection's algorithm that was chosen
 static int
 choosePageToSwap(struct proc *p){
-  if (SELECTION == NFUA){
+
+  #if (SELECTION == NFUA)
     return NFUAlgorithm(p);
-  }
+  #endif
   
-  if (SELECTION == LAPA){
-  return LAPAlgorithm(p);
-}
-  if (SELECTION == SCFIFO){
-  // Try twice in case all the pages have access flag on
-  int ret;
-  ret = SCFIFOAlgorithm(p);
-  if(ret == -1)
-  	return SCFIFOAlgorithm(p);
-  return ret;
-  }
-  if (SELECTION == AQ){
-  return AQAlgorithm(p);
-  }
+  #if (SELECTION == LAPA)
+    return LAPAlgorithm(p);
+  #endif
+  #if (SELECTION == SCFIFO)
+    int ret;
+    // Try twice in case all the pages have access flag on
+    ret = SCFIFOAlgorithm(p);
+    if(ret == -1)
+    	ret = SCFIFOAlgorithm(p);
+    return ret;
+  #endif
+  #if SELECTION == AQ
+    return AQAlgorithm(p);
+  #endif
+
   panic("choosePageToSwap: reached end of function!");
+
 }
 
 // Implementation of NFU + AGING algorithm 
@@ -1027,15 +1036,15 @@ void
 UpdatePagingInfo(uint va){
 	// cprintf("break: UpdatePagingInfo\n");
 
-	if (SELECTION == NONE || SELECTION == SCFIFO){
+	#if (SELECTION == NONE || SELECTION == SCFIFO)
 		return;
-  }
+  #endif
 
 	struct proc *p = myproc();
 	pte_t *pte;
 	pte_t *nextPte;
 
-	if (SELECTION == NFUA || SELECTION == LAPA){
+	#if (SELECTION == NFUA || SELECTION == LAPA)
 	for(int i = 0; i < 16; i++){
 			if(p->ramPages[i].va == -1)
 				continue;
@@ -1049,9 +1058,9 @@ UpdatePagingInfo(uint va){
 				lcr3(V2P(p->pgdir));
 			}
 	}
-	}
+	#endif
 
-	if (SELECTION == AQ){
+	#if (SELECTION == AQ)
 		for(int i = 15; i >= 0; i--){
 			if(p->ramPages[i].va == -1)
 				continue;
@@ -1073,7 +1082,7 @@ UpdatePagingInfo(uint va){
 			}
 		}
 		lcr3(V2P(p->pgdir));
-	}
+	#endif
 
 }
 
