@@ -621,7 +621,10 @@ swapToFile(struct proc *p){
   p->totalPagedOut++;
 
   // Update queue
-  if (SELECTION == SCFIFO || SELECTION == AQ)
+  // if (SELECTION == SCFIFO || SELECTION == AQ)
+  // Update queue - critical to SCFIFO and AQ
+  // not critical in NFUA and LAPA but make more sense
+  // (prevent from newley acllocated page to be paged out immediately)
     updateQueue(p);
   
   // Update PTE info
@@ -930,12 +933,31 @@ removeFromRamArray(struct proc *p, uint va){
 static int
 choosePageToSwap(struct proc *p){
 
+  // Test prints
+    #if (DEBUG == TRUE)
+    cprintf("choosePageToSwap: printing ramPages: \n");
+    for(int i = 0; i < 16; i++){
+      cprintf("ramPages[%d].va: %d\n", i, (p->ramPages[i].va)/4096);
+      cprintf("ramPages[%d].counter: %d\n", i, p->ramPages[i].counter);
+    }
+    #endif
+
   if (SELECTION == NFUA){
-    return NFUAlgorithm(p);
+    int ret;
+    ret = NFUAlgorithm(p);
+    cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
+    if(ret > -1)
+      cprintf("choosePageToSwap: page chosen: %d\n", (p->ramPages[ret].va)/4096);
+    return ret;
   }
   
   if (SELECTION == LAPA){
-    return LAPAlgorithm(p);
+    int ret;
+    ret = LAPAlgorithm(p);
+    cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
+    if(ret > -1)
+      cprintf("choosePageToSwap: page chosen: %d\n", (p->ramPages[ret].va)/4096);
+    return ret;
   }
 
   if (SELECTION == SCFIFO){
@@ -945,7 +967,7 @@ choosePageToSwap(struct proc *p){
     if(ret == -1)
     	ret = SCFIFOAlgorithm(p);
     cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
-    cprintf("choosePageToSwap: page chosen: %d\n", p->ramPages[ret].va);
+    cprintf("choosePageToSwap: page chosen: %d\n", (p->ramPages[ret].va)/4096);
     return ret;
   }
   if (SELECTION == AQ){
@@ -953,7 +975,7 @@ choosePageToSwap(struct proc *p){
     ret = AQAlgorithm(p);
     cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
     if(ret > -1)
-      cprintf("choosePageToSwap: page chosen: %d\n", p->ramPages[ret].va);
+      cprintf("choosePageToSwap: page chosen: %d\n", (p->ramPages[ret].va)/4096);
     return ret;
   }
 

@@ -79,7 +79,9 @@ trap(struct trapframe *tf)
     break;
   case T_PGFLT:
   	// @TODO: remove. test prints
-  	// cprintf("break: Page fault\n");
+    // #if (DEBUG == TRUE)
+  	 cprintf("Page fault\n");
+    // #endif
   	// cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
   	// struct proc *p= myproc();
   	// pde_t *pgdir = p->pgdir;
@@ -104,16 +106,7 @@ trap(struct trapframe *tf)
     	copyOnWrite(PGROUNDDOWN(rcr2()));
     	break;
     }
-   //  pde_t* pgdir = myproc()->pgdir;
-  	// pde_t *pde = &pgdir[PDX(PGROUNDDOWN(rcr2()))];
-  	// pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
-  	// pte_t * pte = &pgtab[PTX(PGROUNDDOWN(rcr2()))];
-    // if(!(*pte & PTE_U) && !(*pte & PTE_W) && !(*pte & PTE_P)){
-    // 	cprintf("break 8\n");
-    // 	cprintf("%s%d\n", "page: ", PGROUNDDOWN(rcr2()));
-    // 	*pte |= PTE_U | PTE_W | PTE_P;
-    // 	break;
-   	// }
+
 
   //PAGEBREAK: 13
   default:
