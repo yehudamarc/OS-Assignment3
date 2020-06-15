@@ -24,6 +24,7 @@ static int LAPAlgorithm(struct proc *p);
 static int SCFIFOAlgorithm(struct proc *p);
 static int AQAlgorithm(struct proc *p);
 static int countSetBits(uint n);
+static void updateQueue(struct proc *p);
 static int allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz);
 static void clearCurrentPagesEntry(int index);
 // static pde_t* old_copyuvm(pde_t *pgdir, uint sz);
@@ -322,11 +323,12 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       }
       if (SELECTION == SCFIFO || SELECTION == AQ){
       	// Update queue
-      	for(int i = indx; i >= 0; i--){
-      		swapRamPages(p, i-1, i);
-        }
-      	p->ramPages[0].va = a;
-      	p->ramPages[0].counter = 0;
+      	// for(int i = indx; i >= 0; i--){
+      	// 	swapRamPages(p, i-1, i);
+       //  }
+        // Put in last place of the queue - first free index
+        p->ramPages[indx].va = a;
+        p->ramPages[indx].counter = 0;
       }
       p->ramCounter++;
     }
@@ -617,6 +619,10 @@ swapToFile(struct proc *p){
   p->swapPages[indx] = va;
   p->swapCounter++;
   p->totalPagedOut++;
+
+  // Update queue
+  if (SELECTION == SCFIFO || SELECTION == AQ)
+    updateQueue(p);
   
   // Update PTE info
   *pte &= ~PTE_P;       // Turn off
@@ -656,7 +662,7 @@ swapToFile(struct proc *p){
   return 0;
 }
 
-// Find free slot on ramPages array of given process
+// Return the first free slot on ramPages array of given process
 // if there is no free space return -1
 static int
 findFreePage(struct proc *p){
@@ -760,11 +766,13 @@ swapToRam(uint va){
   }
   if (SELECTION == SCFIFO || SELECTION == AQ){
     // Update queue
-  	for(int i = indx; i >= 0; i--){
-      swapRamPages(p, i-1, i);
-    }
-   	p->ramPages[0].va = va;
-    p->ramPages[0].counter = 0;
+  	// for(int i = indx; i >= 0; i--){
+   //    swapRamPages(p, i-1, i);
+   //  }
+   // 	p->ramPages[0].va = va;
+   //  p->ramPages[0].counter = 0;
+    p->ramPages[indx].va = va;
+    p->ramPages[indx].counter = 0;
   }
 
   p->ramCounter++;
@@ -909,10 +917,8 @@ removeFromRamArray(struct proc *p, uint va){
 			p->ramPages[i].va = -1;
 			p->ramPages[i].counter = 0;
 			// Currect queue
-			if (SELECTION == NFUA || SELECTION == AQ){
-				for(int j = i; j < 15; j++){
-					swapRamPages(p, j, j+1);
-				}
+			if (SELECTION == SCFIFO || SELECTION == AQ){
+				updateQueue(p);
 				break;
 			}
 		}
@@ -938,10 +944,17 @@ choosePageToSwap(struct proc *p){
     ret = SCFIFOAlgorithm(p);
     if(ret == -1)
     	ret = SCFIFOAlgorithm(p);
+    cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
+    cprintf("choosePageToSwap: page chosen: %d\n", p->ramPages[ret].va);
     return ret;
   }
   if (SELECTION == AQ){
-    return AQAlgorithm(p);
+    int ret;
+    ret = AQAlgorithm(p);
+    cprintf("choosePageToSwap: index of page chosen: %d\n", ret);
+    if(ret > -1)
+      cprintf("choosePageToSwap: page chosen: %d\n", p->ramPages[ret].va);
+    return ret;
   }
 
   panic("choosePageToSwap: reached end of function!");
@@ -1015,12 +1028,16 @@ SCFIFOAlgorithm(struct proc *p){
 			if(*pte & PTE_A){
 				*pte &= ~PTE_A;
 				continue;
-			}else
-			return i;
+			}
+      else{
+			 return i;
+      }
+
 		}
 	}
 	return -1;
 }
+
 
 // Implementation of Advenced Queue algorithm
 static int
@@ -1028,6 +1045,19 @@ AQAlgorithm(struct proc *p){
 	if(p->ramPages[0].va == -1)
 		return -1;
 	return 0; // first index
+}
+
+// Called when SCFIFO or AQ algorithm is chosen
+// after removing 1 page from ramArray
+static void
+updateQueue(struct proc *p){
+  // find the freed entry
+  int indx = findFreePage(p);
+  for(int i = indx; i < 15; i++){
+    if(p->ramPages[i+1].va == -1)
+      break;
+    swapRamPages(p, i, i+1);
+  }
 }
 
 // original allocuvm - without paging framework
@@ -1092,24 +1122,24 @@ UpdatePagingInfo(uint va){
 	}
 
 	if (SELECTION == AQ){
-		for(int i = 15; i >= 0; i--){
+		for(int i = 0; i < 15; i++){
+      // Reached end of queue
 			if(p->ramPages[i].va == -1)
-				continue;
+				break;
 			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
 			if(pte == 0)
 				panic("UpdatePagingInfo: coudlnt fing PTE");
 			// If Access bit is on
 			if(*pte & PTE_A){
 				*pte &= ~PTE_A; //Turn off
-				if(i == 0) // First in queue
-					continue;
-				nextPte = walkpgdir(p->pgdir, (char*)p->ramPages[i-1].va, 0);
+
+				nextPte = walkpgdir(p->pgdir, (char*)p->ramPages[i+1].va, 0);
 				if(nextPte == 0)
 					panic("UpdatePagingInfo: coudlnt fing next PTE");
 				if(*nextPte & PTE_A)
 					continue;
-				swapRamPages(p, i, i-1);
-				i--;
+				swapRamPages(p, i, i+1);
+				i++;
 			}
 		}
 		lcr3(V2P(p->pgdir));
