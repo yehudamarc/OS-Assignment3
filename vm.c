@@ -6,6 +6,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "spinlock.h"
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -26,6 +27,16 @@ static int countSetBits(uint n);
 static int allocuvm_none(pde_t *pgdir, uint oldsz, uint newsz);
 static void clearCurrentPagesEntry(int index);
 // static pde_t* old_copyuvm(pde_t *pgdir, uint sz);
+
+// Lock for the array currentPages (holding refrence counters)
+struct spinlock currentPagesLock;
+
+
+void
+currlockinit(void)
+{
+  initlock(&currentPagesLock, "currentPagesLock");
+}
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -239,27 +250,24 @@ int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
   // cprintf("break: allocuvm\n");
-  #if (SELECTION==SCFIFO)
-   cprintf("selection==scfifo\n");
-  #endif
+  // if (SELECTION==SCFIFO){
+  //  cprintf("selection==scfifo\n");
+  // }
   
-  #if (SELECTION==NFUA)
-    cprintf("selection==nfua\n");
-  #endif
+  // if (SELECTION==NFUA){
+  //   cprintf("selection==nfua\n");
+  // }
   
-  #if (SELECTION==LAPA)
-    cprintf("selection==lapa\n");
-  #endif
+  // if (SELECTION==LAPA){
+  //   cprintf("selection==lapa\n");
+  // }
 
-  #if (SELECTION!=LAPA)
-    cprintf("selection!=lapa\n");
-  #endif
-
-	#if (SELECTION==NONE)
-    cprintf("selection==none\n");
+	if (SELECTION==NONE){
+    // cprintf("selection==none\n");
     // Go to original allocuvm function, without paging framework
   	return allocuvm_none(pgdir, oldsz, newsz);
-  #endif
+  }
+
   char *mem;
   uint a;
   // @TODO: what if it is another proccess?
@@ -303,23 +311,23 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       int indx = findFreePage(p);
       if(indx == -1)
         panic("alocuvm: no free space in ramPages!");
-      #if (SELECTION == NFUA)
+      if (SELECTION == NFUA){
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0;
-      #endif
-      #if (SELECTION == LAPA)
+      }
+      if (SELECTION == LAPA){
       	p->ramPages[indx].va = a;
       	p->ramPages[indx].counter = 0xFFFFFFFF;
         // cprintf("%s%d%s%d\n", "allocuvm: ramPages ", indx, " counter: ", p->ramPages[indx].counter);
-      #endif
-      #if (SELECTION == SCFIFO || SELECTION == AQ)
+      }
+      if (SELECTION == SCFIFO || SELECTION == AQ){
       	// Update queue
       	for(int i = indx; i >= 0; i--){
       		swapRamPages(p, i-1, i);
         }
       	p->ramPages[0].va = a;
       	p->ramPages[0].counter = 0;
-      #endif
+      }
       p->ramCounter++;
     }
   }
@@ -351,6 +359,9 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       if(pa == 0)
         panic("kfree");
     if(p && p->pid > 2){
+
+      acquire(&currentPagesLock);
+
     	// Test prints
     	// cprintf("%s%d\n", "process pid: " , p->pid);
     	// cprintf("%s%d\n", "virtual address: " , a);
@@ -374,17 +385,19 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     	else{
     		panic("deallocuvm: refCounter under 1");
     	}
+
+      release(&currentPagesLock);
     }
     else{
 		char *v = P2V(pa);
 		kfree(v);
     }
       
-    #if (SELECTION != NONE)
+    if (SELECTION != NONE){
       // Clear the place in ram array
       if(p->pgdir == pgdir)
         removeFromRamArray(p, a);
-    #endif
+    }
       *pte = 0;
     }else if((*pte & PTE_PG) != 0){ // In case page is in swapFile
       // Clear the place in swap array
@@ -471,6 +484,8 @@ copyuvm(pde_t *pgdir, uint sz)
     flags = PTE_FLAGS(*pte);
 
     if(p && p->pid > 2){
+      acquire(&currentPagesLock);
+
 	    // COW implemtation
 	    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
 	    	goto bad;
@@ -488,6 +503,7 @@ copyuvm(pde_t *pgdir, uint sz)
 	    *newPte &= ~PTE_W;
 	    lcr3(V2P(d));  // Flush TLB
 	    
+      release(&currentPagesLock);
   	}
   	else{ // it's init or shell - ignore COW
   		if((mem = kalloc()) == 0)
@@ -613,6 +629,9 @@ swapToFile(struct proc *p){
 	  *pte |= PTE_W; 		    // Turn on
 	  lcr3(V2P(p->pgdir));  // Flush TLB
 
+    if(!holding(&currentPagesLock))
+      acquire(&currentPagesLock);
+
 	  // Find in current pages table
 	  int indx = findInCurrentPages(pa);
 
@@ -627,6 +646,9 @@ swapToFile(struct proc *p){
 	  }else {
 	  	currentPages[indx].refCounter--;
 	  }
+
+    if(holding(&currentPagesLock))
+      release(&currentPagesLock);
 	}
   else // Free memory
   	kfree((char*) P2V(PTE_ADDR(*pte)));
@@ -726,24 +748,24 @@ swapToRam(uint va){
   lcr3(V2P(p->pgdir));  // Flush TLB
 
   // Update process paging info
-  #if (SELECTION == NFUA)
+  if (SELECTION == NFUA){
     p->ramPages[indx].va = va;
     p->ramPages[indx].counter = 0;
-  #endif
-  #if (SELECTION == LAPA)
+  }
+  if (SELECTION == LAPA){
     // cprintf("swapToRam: got to LAPA update\n");
     p->ramPages[indx].va = va;
     p->ramPages[indx].counter = 0xFFFFFFFF;
     // cprintf("%s%d\n", "counter: ", p->ramPages[indx].counter);
-  #endif
-  #if (SELECTION == SCFIFO || SELECTION == AQ)
+  }
+  if (SELECTION == SCFIFO || SELECTION == AQ){
     // Update queue
   	for(int i = indx; i >= 0; i--){
       swapRamPages(p, i-1, i);
     }
    	p->ramPages[0].va = va;
     p->ramPages[0].counter = 0;
-  #endif
+  }
 
   p->ramCounter++;
   
@@ -751,6 +773,7 @@ swapToRam(uint va){
 
 // Get virtual address, if exist in currentPages - increase refrence counter
 // else - insert it into currentPages with ref counter of 2
+// Need to be called with currentPagesLock held
 static void
 addToCurrentPages(uint pa){
 	int indx = findInCurrentPages(pa);
@@ -771,6 +794,7 @@ addToCurrentPages(uint pa){
 
 // Find free entry in currentPages array
 // if failed to find - return -1;
+// Need to be called with currentPagesLock held
 static int
 findFreeEntry(void){
 	int indx = -1;
@@ -785,6 +809,7 @@ findFreeEntry(void){
 
 // Given virtual address, find the corresponding 
 // entry in currentPages table
+// Need to be called with currentPagesLock held
 static int
 findInCurrentPages(uint pa){
 	int ret = -1;
@@ -828,6 +853,10 @@ copyOnWrite(uint va){
   	panic("copyOnWrite: not COW fault");
 
   pa = PTE_ADDR(*pte);
+
+  if(!holding(&currentPagesLock))
+    acquire(&currentPagesLock);
+
   int indx = findInCurrentPages(pa);
   if(indx < 0)
   	panic("copyOnWrite: couldnt find page in currentPages");
@@ -856,7 +885,8 @@ copyOnWrite(uint va){
 
   	currentPages[indx].refCounter--;
   }
-
+  if(holding(&currentPagesLock))
+    release(&currentPagesLock);
 }
 
 // Get index of 2 pages in ram array and swap their places
@@ -879,12 +909,12 @@ removeFromRamArray(struct proc *p, uint va){
 			p->ramPages[i].va = -1;
 			p->ramPages[i].counter = 0;
 			// Currect queue
-			#if (SELECTION == NFUA || SELECTION == AQ)
+			if (SELECTION == NFUA || SELECTION == AQ){
 				for(int j = i; j < 15; j++){
 					swapRamPages(p, j, j+1);
 				}
 				break;
-			#endif
+			}
 		}
 	}
 }
@@ -894,24 +924,25 @@ removeFromRamArray(struct proc *p, uint va){
 static int
 choosePageToSwap(struct proc *p){
 
-  #if (SELECTION == NFUA)
+  if (SELECTION == NFUA){
     return NFUAlgorithm(p);
-  #endif
+  }
   
-  #if (SELECTION == LAPA)
+  if (SELECTION == LAPA){
     return LAPAlgorithm(p);
-  #endif
-  #if (SELECTION == SCFIFO)
+  }
+
+  if (SELECTION == SCFIFO){
     int ret;
     // Try twice in case all the pages have access flag on
     ret = SCFIFOAlgorithm(p);
     if(ret == -1)
     	ret = SCFIFOAlgorithm(p);
     return ret;
-  #endif
-  #if SELECTION == AQ
+  }
+  if (SELECTION == AQ){
     return AQAlgorithm(p);
-  #endif
+  }
 
   panic("choosePageToSwap: reached end of function!");
 
@@ -1036,31 +1067,31 @@ void
 UpdatePagingInfo(uint va){
 	// cprintf("break: UpdatePagingInfo\n");
 
-	#if (SELECTION == NONE || SELECTION == SCFIFO)
+	if (SELECTION == NONE || SELECTION == SCFIFO){
 		return;
-  #endif
+  }
 
 	struct proc *p = myproc();
 	pte_t *pte;
 	pte_t *nextPte;
 
-	#if (SELECTION == NFUA || SELECTION == LAPA)
-	for(int i = 0; i < 16; i++){
-			if(p->ramPages[i].va == -1)
-				continue;
-			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
-			if(pte == 0)
-				panic("UpdatePagingInfo: coudlnt fing PTE");
-			p->ramPages[i].counter >>= 1; // shift right
-			if(*pte & PTE_A){
-				p->ramPages[i].counter |= 0x80000000; // turn on MSB
-				*pte &= ~PTE_A;
-				lcr3(V2P(p->pgdir));
-			}
+	if (SELECTION == NFUA || SELECTION == LAPA){
+  	for(int i = 0; i < 16; i++){
+  			if(p->ramPages[i].va == -1)
+  				continue;
+  			pte = walkpgdir(p->pgdir, (char*)p->ramPages[i].va, 0);
+  			if(pte == 0)
+  				panic("UpdatePagingInfo: coudlnt fing PTE");
+  			p->ramPages[i].counter >>= 1; // shift right
+  			if(*pte & PTE_A){
+  				p->ramPages[i].counter |= 0x80000000; // turn on MSB
+  				*pte &= ~PTE_A;
+  				lcr3(V2P(p->pgdir));
+  			}
+  	}
 	}
-	#endif
 
-	#if (SELECTION == AQ)
+	if (SELECTION == AQ){
 		for(int i = 15; i >= 0; i--){
 			if(p->ramPages[i].va == -1)
 				continue;
@@ -1082,11 +1113,12 @@ UpdatePagingInfo(uint va){
 			}
 		}
 		lcr3(V2P(p->pgdir));
-	#endif
+	}
 
 }
 
 // Given an index, clear the correspond currentPages entry
+// Need to be called with currentPagesLock held
 static void
 clearCurrentPagesEntry(int indx){
   currentPages[indx].pa = -1;

@@ -106,7 +106,7 @@ char *a[16];
 		printf(1, "after: %s\n", arr[j][2]);
 	
 		get_pages_info();
-		getpid();
+		printf(1, "Number of free pages should be decreased by 1\n");
 		exit();
 	}
 	wait();
@@ -144,6 +144,9 @@ char *a[16];
 
 	// Allocate more than half of total memory
 	// then performe fork, should collapse without COW
+	
+	// Don't run with SELECTION=NONE - size of currentPages is
+	// too small because the pages pre process limitation removed
 
 	printf(1, "COW test 2 ...\n");
 

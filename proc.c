@@ -309,6 +309,39 @@ exit(void)
     }
   }
 
+  // Printing system information
+  #if (VERBOSE_PRINT==TRUE)
+
+    cprintf("process is exiting, printing infromation:\n");
+
+    static char *states[] = {
+    [UNUSED]    "unused",
+    [EMBRYO]    "embryo",
+    [SLEEPING]  "sleep ",
+    [RUNNABLE]  "runble",
+    [RUNNING]   "run   ",
+    [ZOMBIE]    "zombie"
+    };
+    int i;
+    char *state;
+    uint pc[10];
+
+    if(curproc->state >= 0 && curproc->state < NELEM(states) && states[curproc->state])
+      state = states[curproc->state];
+    else
+      state = "???";
+    cprintf("%d %s %s ", curproc->pid, state, curproc->name);
+
+    cprintf("%d %d %d %d", curproc->ramCounter, curproc->swapCounter, curproc->pageFaults, curproc->totalPagedOut);
+
+    if(curproc->state == SLEEPING){
+      getcallerpcs((uint*)curproc->context->ebp+2, pc);
+      for(i=0; i<10 && pc[i] != 0; i++)
+        cprintf(" %p", pc[i]);
+    }
+    cprintf("\n");
+  #endif
+
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
@@ -387,8 +420,6 @@ scheduler(void)
 
   // Turn on flag
   isSchedActive = 1;
-  // @TODO: remove, replace with selection in makefile
-  // SELECTION = AQ;
   
   for(;;){
     // Enable interrupts on this processor.

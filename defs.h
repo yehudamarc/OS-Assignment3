@@ -203,6 +203,7 @@ void 			swapToRam(uint);
 int 			checkIfCowFault(uint);
 void 			copyOnWrite(uint);
 void 			UpdatePagingInfo(uint);
+void 			currlockinit(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
@@ -231,4 +232,4 @@ struct page currentPages[MAX_PAGES];
 #define LAPA 2
 #define SCFIFO 3
 #define AQ 4
-// int SELECTION;
+int SELECTION_VAR;
